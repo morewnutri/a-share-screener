@@ -1,0 +1,33 @@
+data_dir: data
+
+data:
+  start_date: "2022-01-01"
+  fqt: 1
+  min_history_bars: 150
+  max_workers: 12
+  request_timeout: 12
+  max_retries: 3
+  close_buffer_minutes: 10
+  universe_cache_hours: 24
+  min_universe_size: 2000
+  benchmark_secid: "1.000300"
+  benchmark_name: "CSI300"
+  force_refresh: false
+
+strategy:
+  top_n: 100
+  min_amount_ma20: 50000000
+  max_setup_extension_ma20_pct: 8
+  max_breakout_extension_ma20_pct: 12
+  max_setup_return_5d_pct: 10
+  max_breakout_return_5d_pct: 15
+  setup_min_rs_percentile: 0.65
+  breakout_min_rs_percentile: 0.70
+  watchlist_ttl_sessions: 10
+
+backtest:
+  horizon_sessions: 10
+  target_return_pct: 12
+  max_drawdown_pct: 6
+  top_k: [20, 50, 100]
+
