@@ -18,6 +18,33 @@ SIGNAL_TO_STATE = {
     "retest_after_breakout": "RETEST",
 }
 STATE_PRIORITY = {"SETUP": 1, "TRIGGER": 2, "RETEST": 3}
+WATCHLIST_COLUMNS = [
+    "code",
+    "name",
+    "state",
+    "signals",
+    "first_seen_date",
+    "last_signal_date",
+    "last_evaluated_date",
+    "data_status",
+    "age_sessions",
+    "score_total",
+    "close",
+    "resistance_price",
+    "support_price",
+    "expires_date",
+    "trigger_date",
+    "trigger_price",
+]
+TRANSITION_COLUMNS = [
+    "date",
+    "code",
+    "name",
+    "from_state",
+    "to_state",
+    "signals",
+    "close",
+]
 
 
 def _read_csv(path: Path) -> pd.DataFrame:
@@ -136,13 +163,25 @@ def update_watchlist(
         records.append(record)
 
     watchlist = pd.DataFrame(records)
-    if not watchlist.empty:
+    if watchlist.empty:
+        watchlist = pd.DataFrame(columns=WATCHLIST_COLUMNS)
+    else:
         watchlist = watchlist.sort_values(["state", "score_total"], ascending=[True, False])
-    active = watchlist[watchlist["state"].isin(ACTIVE_STATES)].copy() if not watchlist.empty else watchlist
+    active = watchlist[watchlist["state"].isin(ACTIVE_STATES)].copy()
     new_transitions = pd.DataFrame(transitions)
+    if new_transitions.empty:
+        new_transitions = pd.DataFrame(columns=TRANSITION_COLUMNS)
     transition_history = _read_csv(transitions_path)
+    if transition_history.empty:
+        transition_history = pd.DataFrame(columns=TRANSITION_COLUMNS)
     if not new_transitions.empty:
-        transition_history = pd.concat([transition_history, new_transitions], ignore_index=True)
+        if transition_history.empty:
+            transition_history = new_transitions.copy()
+        else:
+            transition_history = pd.concat(
+                [transition_history, new_transitions],
+                ignore_index=True,
+            )
         transition_history = transition_history.drop_duplicates(
             ["date", "code", "from_state", "to_state"], keep="last"
         )

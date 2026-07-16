@@ -1,7 +1,7 @@
 import pandas as pd
 
 from ashare_scanner.config import DataConfig, StrategyConfig
-from ashare_scanner.strategies import apply_strategies
+from ashare_scanner.strategies import apply_strategies, screening_diagnostics
 
 
 def _row(code: str, close: float, prior_high: float, vol_ratio: float) -> dict:
@@ -60,3 +60,19 @@ def test_scores_are_capped_at_100():
     scored, _ = apply_strategies(frame, DataConfig(), StrategyConfig())
     assert 0 <= scored.loc[0, "score_total"] <= 100
 
+
+
+def test_funnel_final_count_matches_each_signal_output():
+    frame = pd.DataFrame(
+        [
+            _row("000001", close=99.0, prior_high=100.0, vol_ratio=0.8),
+            _row("000002", close=101.0, prior_high=100.0, vol_ratio=1.5),
+        ]
+    )
+    data_config = DataConfig()
+    strategy_config = StrategyConfig()
+    scored, signals = apply_strategies(frame, data_config, strategy_config)
+    funnel, _ = screening_diagnostics(scored, data_config, strategy_config)
+    final_counts = funnel.groupby("signal").tail(1).set_index("signal")["remaining_count"]
+    for signal, selected in signals.items():
+        assert final_counts[signal] == len(selected)

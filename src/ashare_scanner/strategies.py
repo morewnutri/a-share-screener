@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from functools import reduce
+from operator import and_
 
 import numpy as np
 import pandas as pd
@@ -66,25 +68,25 @@ def add_factor_scores(frame: pd.DataFrame) -> pd.DataFrame:
     return result
 
 
-def signal_masks(
+def signal_funnels(
     frame: pd.DataFrame,
     data_config: DataConfig,
     strategy_config: StrategyConfig,
-) -> Mapping[str, pd.Series]:
+) -> Mapping[str, list[tuple[str, pd.Series]]]:
     enough_contraction = (
-        (frame["atr_contraction_ratio"] <= 0.90).astype(int)
-        + (frame["volume_contraction_5_20"] <= 0.90).astype(int)
-        + (frame["bb_contraction_ratio"] <= 0.90).astype(int)
-    ) >= 2
+        (frame["atr_contraction_ratio"] <= strategy_config.contraction_ratio_max).astype(int)
+        + (frame["volume_contraction_5_20"] <= strategy_config.contraction_ratio_max).astype(int)
+        + (frame["bb_contraction_ratio"] <= strategy_config.contraction_ratio_max).astype(int)
+    ) >= strategy_config.contraction_min_count
     trend_base = (
         (frame["close"] > frame["ma20"])
         & (frame["ma20"] > frame["ma60"])
         & (frame["ma20_slope_5_pct"] > 0)
     )
-    eligible = (
-        (frame["bars"] >= data_config.min_history_bars)
-        & (frame["amount_ma20_prev"] >= strategy_config.min_amount_ma20)
-        & (frame["one_price_limit"] == 0)
+    history_ready = frame["bars"] >= data_config.min_history_bars
+    liquid = frame["amount_ma20_prev"] >= strategy_config.min_amount_ma20
+    features_ready = (
+        (frame["one_price_limit"] == 0)
         & frame["prior_high_20"].notna()
         & frame["rs20_percentile"].notna()
     )
@@ -93,54 +95,190 @@ def signal_masks(
         & (frame["return_5d_pct"] <= strategy_config.max_setup_return_5d_pct)
         & (frame["return_10d_pct"] <= 18)
     )
-
-    setup_contraction = (
-        eligible
-        & trend_base
-        & setup_not_extended
-        & frame["dist_to_prior_high20_pct"].between(-6.0, -0.2, inclusive="both")
-        & enough_contraction
-        & (frame["rs20_percentile"] >= strategy_config.setup_min_rs_percentile)
-    )
-    setup_accumulation = (
-        eligible
-        & trend_base
-        & setup_not_extended
-        & frame["dist_to_prior_high20_pct"].between(-12.0, -0.2, inclusive="both")
-        & (frame["up_down_volume_ratio_10"] >= 1.30)
-        & (frame["obv_slope_10_pct"] > 0)
-        & (frame["range_position_10"] >= 0.60)
-        & (frame["rs20_percentile"] >= strategy_config.setup_min_rs_percentile)
-    )
-    breakout_today = (
-        eligible
-        & trend_base
-        & (frame["close"] > frame["prior_high_20"])
-        & frame["dist_to_prior_high20_pct"].between(0.0, 3.0, inclusive="both")
-        & frame["vol_ratio_20"].between(1.20, 4.0, inclusive="both")
-        & (frame["extension_ma20_pct"] <= strategy_config.max_breakout_extension_ma20_pct)
-        & (frame["return_5d_pct"] <= strategy_config.max_breakout_return_5d_pct)
-        & (frame["pct_chg"] < 9.5)
-        & (frame["rsi14"] <= 88)
-        & (frame["rs20_percentile"] >= strategy_config.breakout_min_rs_percentile)
-    )
-    retest_after_breakout = (
-        eligible
-        & trend_base
-        & frame["bars_since_breakout"].between(2, 10, inclusive="both")
-        & frame["retest_distance_pct"].between(-1.5, 3.0, inclusive="both")
-        & (frame["retest_touch"] == 1)
-        & (frame["vol_ratio_20"] <= 1.10)
-        & (frame["close"] >= frame["open"])
-        & (frame["extension_ma20_pct"] <= 10)
-        & (frame["rs20_percentile"] >= strategy_config.setup_min_rs_percentile)
-    )
+    common = [
+        ("history_bars", history_ready),
+        ("liquidity", liquid),
+        ("tradable_features", features_ready),
+        ("trend_structure", trend_base),
+    ]
     return {
-        "setup_contraction": setup_contraction.fillna(False),
-        "setup_accumulation": setup_accumulation.fillna(False),
-        "breakout_today": breakout_today.fillna(False),
-        "retest_after_breakout": retest_after_breakout.fillna(False),
+        "setup_contraction": common
+        + [
+            ("not_extended", setup_not_extended),
+            (
+                "near_prior_high",
+                frame["dist_to_prior_high20_pct"].between(
+                    strategy_config.setup_contraction_distance_min_pct,
+                    strategy_config.setup_distance_max_pct,
+                    inclusive="both",
+                ),
+            ),
+            (
+                "relative_strength",
+                frame["rs20_percentile"] >= strategy_config.setup_min_rs_percentile,
+            ),
+            ("contraction", enough_contraction),
+        ],
+        "setup_accumulation": common
+        + [
+            ("not_extended", setup_not_extended),
+            (
+                "near_prior_high",
+                frame["dist_to_prior_high20_pct"].between(
+                    strategy_config.accumulation_distance_min_pct,
+                    strategy_config.setup_distance_max_pct,
+                    inclusive="both",
+                ),
+            ),
+            (
+                "relative_strength",
+                frame["rs20_percentile"] >= strategy_config.setup_min_rs_percentile,
+            ),
+            (
+                "up_down_volume",
+                frame["up_down_volume_ratio_10"]
+                >= strategy_config.accumulation_up_down_volume_min,
+            ),
+            ("obv_improving", frame["obv_slope_10_pct"] > 0),
+            (
+                "range_position",
+                frame["range_position_10"]
+                >= strategy_config.accumulation_range_position_min,
+            ),
+        ],
+        "breakout_today": common
+        + [
+            ("above_prior_high", frame["close"] > frame["prior_high_20"]),
+            (
+                "breakout_distance",
+                frame["dist_to_prior_high20_pct"].between(
+                    0.0,
+                    strategy_config.breakout_distance_max_pct,
+                    inclusive="both",
+                ),
+            ),
+            (
+                "breakout_volume",
+                frame["vol_ratio_20"].between(
+                    strategy_config.breakout_volume_ratio_min,
+                    strategy_config.breakout_volume_ratio_max,
+                    inclusive="both",
+                ),
+            ),
+            (
+                "not_overextended",
+                (frame["extension_ma20_pct"] <= strategy_config.max_breakout_extension_ma20_pct)
+                & (frame["return_5d_pct"] <= strategy_config.max_breakout_return_5d_pct),
+            ),
+            ("buyable_close", (frame["pct_chg"] < 9.5) & (frame["rsi14"] <= 88)),
+            (
+                "relative_strength",
+                frame["rs20_percentile"] >= strategy_config.breakout_min_rs_percentile,
+            ),
+        ],
+        "retest_after_breakout": common
+        + [
+            (
+                "recent_breakout",
+                frame["bars_since_breakout"].between(2, 10, inclusive="both"),
+            ),
+            (
+                "near_breakout_level",
+                frame["retest_distance_pct"].between(-1.5, 3.0, inclusive="both")
+                & (frame["retest_touch"] == 1),
+            ),
+            (
+                "quiet_retest",
+                frame["vol_ratio_20"] <= strategy_config.retest_volume_ratio_max,
+            ),
+            (
+                "close_recovered",
+                (frame["close"] >= frame["open"])
+                & (frame["extension_ma20_pct"] <= 10),
+            ),
+            (
+                "relative_strength",
+                frame["rs20_percentile"] >= strategy_config.setup_min_rs_percentile,
+            ),
+        ],
     }
+
+
+def signal_masks(
+    frame: pd.DataFrame,
+    data_config: DataConfig,
+    strategy_config: StrategyConfig,
+) -> Mapping[str, pd.Series]:
+    funnels = signal_funnels(frame, data_config, strategy_config)
+    return {
+        signal: reduce(and_, (condition.fillna(False) for _, condition in steps))
+        for signal, steps in funnels.items()
+    }
+
+
+def screening_diagnostics(
+    frame: pd.DataFrame,
+    data_config: DataConfig,
+    strategy_config: StrategyConfig,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    funnels = signal_funnels(frame, data_config, strategy_config)
+    masks = signal_masks(frame, data_config, strategy_config)
+    funnel_rows: list[dict] = []
+    total = len(frame)
+
+    best_ratio = np.full(total, -1.0)
+    best_signal = np.full(total, "", dtype=object)
+    best_failed_at = np.full(total, "", dtype=object)
+    best_passed = np.zeros(total, dtype=int)
+    best_total = np.zeros(total, dtype=int)
+
+    for signal, steps in funnels.items():
+        running = np.ones(total, dtype=bool)
+        first_failure = np.full(total, "", dtype=object)
+        passed = np.zeros(total, dtype=int)
+        previous_count = total
+        for step_number, (step, condition) in enumerate(steps, start=1):
+            values = condition.fillna(False).to_numpy(dtype=bool)
+            first_failure[running & ~values] = step
+            running &= values
+            passed += running.astype(int)
+            count = int(running.sum())
+            funnel_rows.append(
+                {
+                    "signal": signal,
+                    "step_number": step_number,
+                    "step": step,
+                    "remaining_count": count,
+                    "retention_from_previous_pct": round(count / previous_count * 100, 2)
+                    if previous_count
+                    else 0.0,
+                    "retention_from_all_pct": round(count / total * 100, 2) if total else 0.0,
+                }
+            )
+            previous_count = count
+        ratio = passed / len(steps)
+        better = ratio > best_ratio
+        best_ratio[better] = ratio[better]
+        best_signal[better] = signal
+        best_failed_at[better] = first_failure[better]
+        best_passed[better] = passed[better]
+        best_total[better] = len(steps)
+
+    matched = np.zeros(total, dtype=bool)
+    for mask in masks.values():
+        matched |= mask.to_numpy(dtype=bool)
+    near_misses = frame.loc[~matched].copy()
+    near_misses["closest_signal"] = best_signal[~matched]
+    near_misses["failed_at"] = best_failed_at[~matched]
+    near_misses["passed_steps"] = best_passed[~matched]
+    near_misses["total_steps"] = best_total[~matched]
+    near_misses["completion_ratio"] = best_ratio[~matched]
+    near_misses = near_misses.sort_values(
+        ["completion_ratio", "score_total", "rs20_percentile"],
+        ascending=[False, False, False],
+    ).reset_index(drop=True)
+    near_misses["near_miss_rank"] = np.arange(1, len(near_misses) + 1)
+    return pd.DataFrame(funnel_rows), near_misses
 
 
 def apply_strategies(
@@ -161,4 +299,3 @@ def apply_strategies(
         selected["rank"] = np.arange(1, len(selected) + 1)
         outputs[signal] = selected
     return scored, outputs
-

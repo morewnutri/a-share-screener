@@ -17,7 +17,12 @@ from .datasource import EastmoneyDataSource
 from .http import HttpClient
 from .indicators import compute_indicators, latest_snapshot
 from .state import update_watchlist
-from .strategies import SIGNAL_ORDER, add_relative_strength, apply_strategies
+from .strategies import (
+    SIGNAL_ORDER,
+    add_relative_strength,
+    apply_strategies,
+    screening_diagnostics,
+)
 
 
 LOGGER = logging.getLogger(__name__)
@@ -101,6 +106,14 @@ class DailyScanner:
             self.config.data,
             self.config.strategy,
         )
+        funnel, near_misses = screening_diagnostics(
+            scored,
+            self.config.data,
+            self.config.strategy,
+        )
+        atomic_write_csv(funnel, run_dir / "screening_funnel.csv")
+        near_misses["date"] = pd.to_datetime(near_misses["date"]).dt.strftime("%Y-%m-%d")
+        atomic_write_csv(near_misses.head(100), run_dir / "near_miss_top100.csv")
         scored["date"] = scored["date"].dt.strftime("%Y-%m-%d")
         atomic_write_csv(scored.sort_values("code"), run_dir / "indicators_scored.csv")
 
@@ -132,6 +145,7 @@ class DailyScanner:
             scored,
             signals,
             active_watchlist,
+            funnel,
             time.monotonic() - started,
         )
         atomic_write_json(report, run_dir / "coverage_report.json")
@@ -236,10 +250,37 @@ class DailyScanner:
         indicators: pd.DataFrame,
         signals: dict[str, pd.DataFrame],
         active_watchlist: pd.DataFrame,
+        funnel: pd.DataFrame,
         elapsed_seconds: float,
     ) -> dict[str, Any]:
         status_counts = statuses["status"].value_counts().to_dict()
         failures = statuses[statuses["status"].isin(["failed", "stale_hist", "empty_hist"])]
+        candidate_codes = {
+            str(code).zfill(6)
+            for frame in signals.values()
+            for code in frame.get("code", pd.Series(dtype=str)).tolist()
+        }
+        candidate_rate = len(candidate_codes) / len(indicators) * 100 if len(indicators) else 0.0
+        coverage = len(indicators) / len(universe) * 100 if len(universe) else 0.0
+        if coverage < 90:
+            assessment = "数据覆盖率低于90%，应先排查抓取失败，不能判断策略松紧。"
+        elif candidate_rate < 0.2:
+            assessment = "候选率低于0.2%，默认条件偏严格，或当日市场缺少匹配的趋势/收缩结构。"
+        elif candidate_rate < 1.0:
+            assessment = "候选率低于1%，策略选择性较强；结合筛选漏斗判断主要淘汰步骤。"
+        else:
+            assessment = "候选率正常；仍需通过回测评估精确率和召回率。"
+        funnel_records = [
+            {
+                "signal": row.signal,
+                "step_number": int(row.step_number),
+                "step": row.step,
+                "remaining_count": int(row.remaining_count),
+                "retention_from_previous_pct": float(row.retention_from_previous_pct),
+                "retention_from_all_pct": float(row.retention_from_all_pct),
+            }
+            for row in funnel.itertuples(index=False)
+        ]
         return {
             "run_time": datetime.now().astimezone().isoformat(timespec="seconds"),
             "expected_complete_session": expected.isoformat(),
@@ -262,12 +303,18 @@ class DailyScanner:
             },
             "fetch": {
                 "status_counts": {str(key): int(value) for key, value in status_counts.items()},
-                "coverage_pct": round(len(indicators) / len(universe) * 100, 2) if len(universe) else 0,
+                "coverage_pct": round(coverage, 2),
                 "problem_rows": failures[["code", "name", "status", "last_date", "error"]].to_dict(
                     orient="records"
                 ),
             },
             "signals": {name: int(len(frame)) for name, frame in signals.items()},
+            "screening": {
+                "unique_candidate_count": int(len(candidate_codes)),
+                "candidate_rate_pct": round(candidate_rate, 3),
+                "assessment": assessment,
+                "funnel": funnel_records,
+            },
             "top_n_is_separate_from_full_results": True,
             "active_watchlist_count": int(len(active_watchlist)),
             "disclaimer": "Research output only; strategy thresholds require walk-forward validation.",

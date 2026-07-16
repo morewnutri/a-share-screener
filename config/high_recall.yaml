@@ -1,0 +1,43 @@
+data_dir: data
+
+data:
+  start_date: "2022-01-01"
+  fqt: 1
+  min_history_bars: 120
+  max_workers: 12
+  request_timeout: 12
+  max_retries: 3
+  close_buffer_minutes: 10
+  universe_cache_hours: 24
+  min_universe_size: 2000
+  benchmark_secid: "1.000300"
+  benchmark_name: "CSI300"
+  force_refresh: false
+
+strategy:
+  top_n: 100
+  min_amount_ma20: 30000000
+  max_setup_extension_ma20_pct: 10
+  max_breakout_extension_ma20_pct: 15
+  max_setup_return_5d_pct: 12
+  max_breakout_return_5d_pct: 18
+  setup_min_rs_percentile: 0.55
+  breakout_min_rs_percentile: 0.60
+  setup_contraction_distance_min_pct: -8
+  setup_distance_max_pct: -0.1
+  accumulation_distance_min_pct: -15
+  contraction_ratio_max: 1.0
+  contraction_min_count: 2
+  accumulation_up_down_volume_min: 1.15
+  accumulation_range_position_min: 0.55
+  breakout_distance_max_pct: 4
+  breakout_volume_ratio_min: 1.05
+  breakout_volume_ratio_max: 4.5
+  retest_volume_ratio_max: 1.20
+  watchlist_ttl_sessions: 12
+
+backtest:
+  horizon_sessions: 10
+  target_return_pct: 12
+  max_drawdown_pct: 6
+  top_k: [20, 50, 100]

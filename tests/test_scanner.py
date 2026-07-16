@@ -6,10 +6,11 @@ import pandas as pd
 
 from ashare_scanner.cache import HistoryCache, UniverseCache
 from ashare_scanner.config import AppConfig, DataConfig, StrategyConfig
+from ashare_scanner.reporting import print_run_summary
 from ashare_scanner.scanner import DailyScanner
 
 
-def test_daily_scanner_runs_end_to_end_from_fresh_cache(tmp_path, trending_history):
+def test_daily_scanner_runs_end_to_end_from_fresh_cache(tmp_path, trending_history, capsys):
     expected = pd.Timestamp("2026-07-15").date()
     history = trending_history.copy()
     history["date"] = pd.bdate_range(end=expected.isoformat(), periods=len(history))
@@ -57,4 +58,11 @@ def test_daily_scanner_runs_end_to_end_from_fresh_cache(tmp_path, trending_histo
     assert report["fetch"]["coverage_pct"] == 100.0
     assert (run_dir / "indicators_scored.csv").exists()
     assert (run_dir / "setup_contraction_all.csv").exists()
+    assert (run_dir / "screening_funnel.csv").exists()
+    assert (run_dir / "near_miss_top100.csv").exists()
+    assert "screening" in report
+    print_run_summary(run_dir, top_n=5)
+    output = capsys.readouterr().out
+    assert "[突破前收缩]" in output
+    assert "[筛选漏斗]" in output
 

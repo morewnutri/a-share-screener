@@ -23,6 +23,17 @@ strategy:
   max_breakout_return_5d_pct: 15
   setup_min_rs_percentile: 0.65
   breakout_min_rs_percentile: 0.70
+  setup_contraction_distance_min_pct: -6
+  setup_distance_max_pct: -0.2
+  accumulation_distance_min_pct: -12
+  contraction_ratio_max: 0.90
+  contraction_min_count: 2
+  accumulation_up_down_volume_min: 1.30
+  accumulation_range_position_min: 0.60
+  breakout_distance_max_pct: 3
+  breakout_volume_ratio_min: 1.20
+  breakout_volume_ratio_max: 4.0
+  retest_volume_ratio_max: 1.10
   watchlist_ttl_sessions: 10
 
 backtest:

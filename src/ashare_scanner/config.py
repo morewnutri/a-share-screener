@@ -33,6 +33,17 @@ class StrategyConfig:
     max_breakout_return_5d_pct: float = 15.0
     setup_min_rs_percentile: float = 0.65
     breakout_min_rs_percentile: float = 0.70
+    setup_contraction_distance_min_pct: float = -6.0
+    setup_distance_max_pct: float = -0.2
+    accumulation_distance_min_pct: float = -12.0
+    contraction_ratio_max: float = 0.90
+    contraction_min_count: int = 2
+    accumulation_up_down_volume_min: float = 1.30
+    accumulation_range_position_min: float = 0.60
+    breakout_distance_max_pct: float = 3.0
+    breakout_volume_ratio_min: float = 1.20
+    breakout_volume_ratio_max: float = 4.0
+    retest_volume_ratio_max: float = 1.10
     watchlist_ttl_sessions: int = 10
 
 

@@ -31,3 +31,22 @@ def test_watchlist_update_is_idempotent_for_same_session(tmp_path):
     assert second.loc[0, "age_sessions"] == 0
     assert second_transitions.empty
 
+
+
+def test_empty_watchlist_csv_keeps_headers(tmp_path):
+    signals = {
+        "setup_contraction": pd.DataFrame(),
+        "setup_accumulation": pd.DataFrame(),
+        "breakout_today": pd.DataFrame(),
+        "retest_after_breakout": pd.DataFrame(),
+    }
+    update_watchlist(
+        tmp_path,
+        signals,
+        pd.DataFrame(),
+        date(2026, 7, 15),
+        10,
+    )
+    saved = pd.read_csv(tmp_path / "state" / "watchlist.csv")
+    assert {"code", "name", "state", "signals"}.issubset(saved.columns)
+    assert saved.empty

@@ -41,6 +41,8 @@
 3. 修改第一段代码中的 `REPO_URL`。
 4. 运行全部单元格并授权挂载 Google Drive。
 
+扫描结束后会直接在 Colab 输出四类候选、关键指标、筛选漏斗和最接近入选的股票。`CONFIG_PATH` 默认为严格的 `config/default.yaml`；需要扩大观察池时可改为 `config/high_recall.yaml`。
+
 首次运行需要抓取全市场历史数据，后续交易日会优先复用已到最新完整交易日的缓存。由于采用前复权，缓存 schema 或起始日期改变时会自动失效并重抓。
 
 ## 本地使用
@@ -76,9 +78,11 @@ python -m ashare_scanner --config config/default.yaml --data-dir data backtest \
 - `<signal>_top100.csv`：便于人工查看的 Top 榜。
 - `watchlist_active.csv`：跨日活跃观察池。
 - `state_transitions.csv`：本次状态变化。
-- `coverage_report.json`：覆盖率、失败明细和真实候选数量。
+- `screening_funnel.csv`：四类策略每一步还剩多少股票。
+- `near_miss_top100.csv`：没有入选但最接近通过完整条件的股票及失败步骤。
+- `coverage_report.json`：覆盖率、失败明细、真实候选数量和自动诊断。
 
-持久状态位于 `DATA_DIR/state/`，历史缓存位于 `DATA_DIR/cache/`。
+持久状态位于 `DATA_DIR/state/`，历史缓存位于 `DATA_DIR/cache/`。`watchlist_active.csv` 只有表头或没有数据行，表示当天及历史有效期内没有活跃候选，不代表抓取一定失败；先检查 `coverage_report.json` 的覆盖率和 `fetch_status.csv`。
 
 ## 回测口径
 
@@ -95,7 +99,13 @@ python -m ashare_scanner --config config/default.yaml --data-dir data backtest \
 
 ## 配置建议
 
-主要参数在 `config/default.yaml`。建议先保持默认值运行至少数月并回测，不要根据少数案例直接调权重。
+主要参数在 `config/default.yaml`。默认配置选择性较强：流动性、趋势、不过度上涨、前高位置、相对强度及各策略专属量价条件必须同时成立，因此单日 0 至几只并不异常，但不能仅凭候选少断定市场差。
+
+`config/high_recall.yaml` 是更宽松的观察池配置，会降低流动性和相对强度门槛、扩大前高距离及突破量比范围。它会增加误报，应该与默认配置分别回测，而不是把候选数量多当成策略更好。
+
+```bash
+python -m ashare_scanner --config config/high_recall.yaml --data-dir data run
+```
 
 - `min_amount_ma20` 应按资金规模调整。
 - `setup_min_rs_percentile` 越低，观察池召回率通常越高，误报也越多。

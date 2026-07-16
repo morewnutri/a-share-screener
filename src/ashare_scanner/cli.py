@@ -8,6 +8,7 @@ from pathlib import Path
 from .backtest import Backtester
 from .calendar import expected_complete_session
 from .config import load_config
+from .reporting import print_run_summary
 from .scanner import DailyScanner
 
 
@@ -26,6 +27,12 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument(
         "--as-of",
         help="ISO datetime used to determine the latest complete session (testing/replay)",
+    )
+    run_parser.add_argument(
+        "--print-top",
+        type=int,
+        default=20,
+        help="Number of candidates printed for each signal",
     )
 
     backtest_parser = subparsers.add_parser("backtest", help="Backtest using cached histories")
@@ -46,7 +53,7 @@ def main(argv: list[str] | None = None) -> int:
     config = load_config(Path(args.config))
     if args.command == "run":
         output = DailyScanner(config, args.data_dir).run(_as_datetime(args.as_of))
-        print(output)
+        print_run_summary(output, args.print_top)
     elif args.command == "backtest":
         output = Backtester(config, args.data_dir).run(
             date.fromisoformat(args.start),
