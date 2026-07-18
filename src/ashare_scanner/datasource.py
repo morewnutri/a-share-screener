@@ -135,7 +135,7 @@ class EastmoneyDataSource:
             "invt": 2,
             "fid": "f12",
             "fs": EASTMONEY_FS,
-            "fields": "f2,f3,f5,f6,f8,f12,f13,f14,f20,f21",
+            "fields": "f2,f3,f5,f6,f8,f12,f13,f14,f20,f21,f62,f184",
             "_": str(int(time.time() * 1000)),
         }
         payload = self.http.get_json(
@@ -159,6 +159,8 @@ class EastmoneyDataSource:
                 "turnover": safe_float(item.get("f8")),
                 "market_cap": safe_float(item.get("f20")),
                 "float_market_cap": safe_float(item.get("f21")),
+                "main_net_inflow_amount": safe_float(item.get("f62")),
+                "main_net_inflow_ratio_pct": safe_float(item.get("f184")),
             }
             for item in items
         ]
@@ -168,7 +170,7 @@ class EastmoneyDataSource:
     def _filter_universe(frame: pd.DataFrame, min_size: int) -> pd.DataFrame:
         frame = frame[frame["code"].map(is_mainboard_code)].copy()
         frame["is_st"] = frame["name"].str.upper().str.contains("ST", na=False)
-        frame["is_delisting"] = frame["name"].str.contains("退", na=False)
+        frame["is_delisting"] = frame["name"].str.contains("\u9000", regex=False, na=False)
         frame = frame[~frame["is_st"] & ~frame["is_delisting"]]
         frame = frame.drop_duplicates("code").sort_values("code").reset_index(drop=True)
         if len(frame) < min_size:
@@ -228,6 +230,8 @@ class EastmoneyDataSource:
                     "turnover": np.nan,
                     "market_cap": np.nan,
                     "float_market_cap": np.nan,
+                    "main_net_inflow_amount": np.nan,
+                    "main_net_inflow_ratio_pct": np.nan,
                 }
             )
         return rows

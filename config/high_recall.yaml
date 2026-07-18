@@ -15,26 +15,18 @@ data:
   force_refresh: false
 
 strategy:
-  top_n: 100
-  min_amount_ma20: 30000000
-  max_setup_extension_ma20_pct: 10
-  max_breakout_extension_ma20_pct: 15
-  max_setup_return_5d_pct: 12
-  max_breakout_return_5d_pct: 18
-  setup_min_rs_percentile: 0.55
-  breakout_min_rs_percentile: 0.60
-  setup_contraction_distance_min_pct: -8
-  setup_distance_max_pct: -0.1
-  accumulation_distance_min_pct: -15
-  contraction_ratio_max: 1.0
-  contraction_min_count: 2
-  accumulation_up_down_volume_min: 1.15
-  accumulation_range_position_min: 0.55
-  breakout_distance_max_pct: 4
-  breakout_volume_ratio_min: 1.05
-  breakout_volume_ratio_max: 4.5
-  retest_volume_ratio_max: 1.20
-  watchlist_ttl_sessions: 12
+  top_n: 150
+  min_amount_ma20: 20000000
+  accumulation_score_min: 48
+  accumulation_min_evidence_groups: 2
+  accumulation_max_position_250: 0.90
+  accumulation_max_return_20d_pct: 40
+  accumulation_max_extension_ma60_pct: 25
+  accumulation_max_distribution_days_5: 3
+  main_wave_score_min: 52
+  main_wave_max_extension_ma20_pct: 20
+  main_wave_max_return_10d_pct: 32
+  watchlist_ttl_sessions: 15
 
 backtest:
   horizon_sessions: 10

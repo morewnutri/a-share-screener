@@ -16,10 +16,8 @@ def test_watchlist_update_is_idempotent_for_same_session(tmp_path):
         "ma20": 9.5,
     }
     signals = {
-        "setup_contraction": pd.DataFrame([row]),
-        "setup_accumulation": pd.DataFrame(),
-        "breakout_today": pd.DataFrame(),
-        "retest_after_breakout": pd.DataFrame(),
+        "accumulation_late": pd.DataFrame([row]),
+        "main_wave": pd.DataFrame(),
     }
     indicators = pd.DataFrame([row])
     session = date(2026, 7, 15)
@@ -32,13 +30,10 @@ def test_watchlist_update_is_idempotent_for_same_session(tmp_path):
     assert second_transitions.empty
 
 
-
 def test_empty_watchlist_csv_keeps_headers(tmp_path):
     signals = {
-        "setup_contraction": pd.DataFrame(),
-        "setup_accumulation": pd.DataFrame(),
-        "breakout_today": pd.DataFrame(),
-        "retest_after_breakout": pd.DataFrame(),
+        "accumulation_late": pd.DataFrame(),
+        "main_wave": pd.DataFrame(),
     }
     update_watchlist(
         tmp_path,

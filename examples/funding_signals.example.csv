@@ -1,0 +1,3 @@
+code,date,main_net_inflow_ratio_pct,main_net_inflow_amount,main_net_inflow_positive_days_5,institution_net_buy_amount,margin_balance_growth_3d_pct,shareholder_count_change_pct,sector_profit_growth_median_pct,has_reduction_plan,industry_risk_ok
+000001,2026-07-17,22.5,180000000,5,62000000,11.2,-6.8,24.0,0,1
+600000,2026-07-17,8.0,45000000,2,,3.1,-1.2,18.0,1,1

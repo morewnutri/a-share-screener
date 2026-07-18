@@ -46,7 +46,10 @@ def test_daily_scanner_runs_end_to_end_from_fresh_cache(tmp_path, trending_histo
         expected,
     )
     universe = pd.DataFrame(
-        [{"code": "000001", "name": "sample-a"}, {"code": "000002", "name": "sample-b"}]
+        [
+            {"code": "000001", "name": "sample-a", "float_market_cap": 10_000_000_000},
+            {"code": "000002", "name": "sample-b", "float_market_cap": 12_000_000_000},
+        ]
     )
     UniverseCache(tmp_path / "cache").write(universe, "test", expected)
 
@@ -56,13 +59,14 @@ def test_daily_scanner_runs_end_to_end_from_fresh_cache(tmp_path, trending_histo
     report = json.loads((run_dir / "coverage_report.json").read_text(encoding="utf-8"))
     assert report["fetch"]["status_counts"] == {"ok": 2}
     assert report["fetch"]["coverage_pct"] == 100.0
+    assert report["external_evidence"]["loaded"] is False
     assert (run_dir / "indicators_scored.csv").exists()
-    assert (run_dir / "setup_contraction_all.csv").exists()
+    assert (run_dir / "accumulation_late_all.csv").exists()
+    assert (run_dir / "main_wave_all.csv").exists()
     assert (run_dir / "screening_funnel.csv").exists()
     assert (run_dir / "near_miss_top100.csv").exists()
-    assert "screening" in report
     print_run_summary(run_dir, top_n=5)
     output = capsys.readouterr().out
-    assert "[突破前收缩]" in output
+    assert "[强资金运作型（埋伏吸筹末期）]" in output
     assert "[筛选漏斗]" in output
-
+    assert "外部资金证据: 未加载" in output

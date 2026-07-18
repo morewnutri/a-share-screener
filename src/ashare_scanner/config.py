@@ -26,25 +26,17 @@ class DataConfig:
 @dataclass(frozen=True)
 class StrategyConfig:
     top_n: int = 100
-    min_amount_ma20: float = 50_000_000
-    max_setup_extension_ma20_pct: float = 8.0
-    max_breakout_extension_ma20_pct: float = 12.0
-    max_setup_return_5d_pct: float = 10.0
-    max_breakout_return_5d_pct: float = 15.0
-    setup_min_rs_percentile: float = 0.65
-    breakout_min_rs_percentile: float = 0.70
-    setup_contraction_distance_min_pct: float = -6.0
-    setup_distance_max_pct: float = -0.2
-    accumulation_distance_min_pct: float = -12.0
-    contraction_ratio_max: float = 0.90
-    contraction_min_count: int = 2
-    accumulation_up_down_volume_min: float = 1.30
-    accumulation_range_position_min: float = 0.60
-    breakout_distance_max_pct: float = 3.0
-    breakout_volume_ratio_min: float = 1.20
-    breakout_volume_ratio_max: float = 4.0
-    retest_volume_ratio_max: float = 1.10
-    watchlist_ttl_sessions: int = 10
+    min_amount_ma20: float = 30_000_000
+    accumulation_score_min: float = 55.0
+    accumulation_min_evidence_groups: int = 3
+    accumulation_max_position_250: float = 0.80
+    accumulation_max_return_20d_pct: float = 30.0
+    accumulation_max_extension_ma60_pct: float = 18.0
+    accumulation_max_distribution_days_5: int = 2
+    main_wave_score_min: float = 58.0
+    main_wave_max_extension_ma20_pct: float = 16.0
+    main_wave_max_return_10d_pct: float = 25.0
+    watchlist_ttl_sessions: int = 12
 
 
 @dataclass(frozen=True)
@@ -69,10 +61,16 @@ class AppConfig:
             raise ValueError("min_history_bars must be at least 120 for the configured indicators.")
         if self.data.max_workers < 1:
             raise ValueError("max_workers must be positive.")
-        if not 0 <= self.strategy.setup_min_rs_percentile <= 1:
-            raise ValueError("setup_min_rs_percentile must be between 0 and 1.")
-        if not 0 <= self.strategy.breakout_min_rs_percentile <= 1:
-            raise ValueError("breakout_min_rs_percentile must be between 0 and 1.")
+        for value, name in (
+            (self.strategy.accumulation_score_min, "accumulation_score_min"),
+            (self.strategy.main_wave_score_min, "main_wave_score_min"),
+        ):
+            if not 0 <= value <= 100:
+                raise ValueError(f"{name} must be between 0 and 100.")
+        if not 1 <= self.strategy.accumulation_min_evidence_groups <= 5:
+            raise ValueError("accumulation_min_evidence_groups must be between 1 and 5.")
+        if not 0 < self.strategy.accumulation_max_position_250 <= 1:
+            raise ValueError("accumulation_max_position_250 must be in (0, 1].")
         if self.backtest.horizon_sessions < 1:
             raise ValueError("horizon_sessions must be positive.")
 
@@ -103,4 +101,3 @@ def load_config(path: str | Path) -> AppConfig:
     )
     config.validate()
     return config
-

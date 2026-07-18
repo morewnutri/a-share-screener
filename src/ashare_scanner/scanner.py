@@ -14,6 +14,7 @@ from .cache import HistoryCache, UniverseCache, atomic_write_csv, atomic_write_j
 from .calendar import expected_complete_session
 from .config import AppConfig
 from .datasource import EastmoneyDataSource
+from .enrichment import merge_optional_evidence
 from .http import HttpClient
 from .indicators import compute_indicators, latest_snapshot
 from .state import update_watchlist
@@ -58,8 +59,13 @@ class DailyScanner:
 
         benchmark = self._get_benchmark(expected)
         benchmark_indicators = compute_indicators(benchmark)
-        benchmark_map20 = benchmark_indicators.set_index("date")["return_20d_pct"]
-        benchmark_map60 = benchmark_indicators.set_index("date")["return_60d_pct"]
+        benchmark_by_date = benchmark_indicators.set_index("date")
+        benchmark_map20 = benchmark_by_date["return_20d_pct"]
+        benchmark_map60 = benchmark_by_date["return_60d_pct"]
+        benchmark_risk_map = (
+            (benchmark_by_date["close"] >= benchmark_by_date["ma20"] * 0.97)
+            & (benchmark_by_date["return_20d_pct"] > -8)
+        ).astype(int)
 
         statuses: list[dict[str, Any]] = []
         snapshots: list[dict[str, Any]] = []
@@ -100,6 +106,26 @@ class DailyScanner:
         indicators["date"] = pd.to_datetime(indicators["date"])
         indicators["benchmark_return_20d_pct"] = indicators["date"].map(benchmark_map20)
         indicators["benchmark_return_60d_pct"] = indicators["date"].map(benchmark_map60)
+        indicators["benchmark_risk_ok"] = indicators["date"].map(benchmark_risk_map).fillna(1)
+        context_columns = [
+            column
+            for column in (
+                "code",
+                "market_cap",
+                "float_market_cap",
+                "main_net_inflow_amount",
+                "main_net_inflow_ratio_pct",
+            )
+            if column in universe.columns
+        ]
+        universe_context = universe[context_columns].copy()
+        universe_context["code"] = universe_context["code"].astype(str).str.zfill(6)
+        indicators = indicators.merge(universe_context, on="code", how="left")
+        indicators, external_metadata = merge_optional_evidence(
+            indicators,
+            self.data_dir,
+            expected,
+        )
         indicators = add_relative_strength(indicators)
         scored, signals = apply_strategies(
             indicators,
@@ -146,6 +172,7 @@ class DailyScanner:
             signals,
             active_watchlist,
             funnel,
+            external_metadata,
             time.monotonic() - started,
         )
         atomic_write_json(report, run_dir / "coverage_report.json")
@@ -251,6 +278,7 @@ class DailyScanner:
         signals: dict[str, pd.DataFrame],
         active_watchlist: pd.DataFrame,
         funnel: pd.DataFrame,
+        external_metadata: dict[str, Any],
         elapsed_seconds: float,
     ) -> dict[str, Any]:
         status_counts = statuses["status"].value_counts().to_dict()
@@ -263,13 +291,13 @@ class DailyScanner:
         candidate_rate = len(candidate_codes) / len(indicators) * 100 if len(indicators) else 0.0
         coverage = len(indicators) / len(universe) * 100 if len(universe) else 0.0
         if coverage < 90:
-            assessment = "数据覆盖率低于90%，应先排查抓取失败，不能判断策略松紧。"
+            assessment = "数据覆盖率低于90%，应先排查抓取失败，不能据此判断策略或市场。"
         elif candidate_rate < 0.2:
-            assessment = "候选率低于0.2%，默认条件偏严格，或当日市场缺少匹配的趋势/收缩结构。"
+            assessment = "候选率低于0.2%。先看筛选漏斗：主要卡在评分通常表示阈值偏严；两类模型的结构分普遍偏低，才更可能是当日匹配度低。"
         elif candidate_rate < 1.0:
-            assessment = "候选率低于1%，策略选择性较强；结合筛选漏斗判断主要淘汰步骤。"
+            assessment = "候选率低于1%，属于选择性较强的结果；结合两个模型的近似入选股和分项得分判断，不要只看数量。"
         else:
-            assessment = "候选率正常；仍需通过回测评估精确率和召回率。"
+            assessment = "候选数量不低，但数量不代表有效性，仍需用滚动回测检查命中率、回撤和不同市场阶段的稳定性。"
         funnel_records = [
             {
                 "signal": row.signal,
@@ -309,6 +337,7 @@ class DailyScanner:
                 ),
             },
             "signals": {name: int(len(frame)) for name, frame in signals.items()},
+            "external_evidence": external_metadata,
             "screening": {
                 "unique_candidate_count": int(len(candidate_codes)),
                 "candidate_rate_pct": round(candidate_rate, 3),

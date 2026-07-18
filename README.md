@@ -1,121 +1,141 @@
-# A股主板日线观察池
+# A股主板双模式日线筛选器
 
-这是一个面向 **收盘后或次日开盘前** 的 A 股主板日线扫描项目。它使用 `requests` 抓取公开行情，不依赖 AkShare，不处理盘中触发，也不把未复权备用数据混进同一排行榜。
+这是一个面向 **收盘后或次日开盘前** 的 A 股主板观察池项目。程序使用 `requests` 获取公开行情，不依赖 AkShare，不做盘中触发。代码可放在 GitHub，缓存、状态和每日结果可持久化到 Google Drive。
 
-项目输出的是研究观察池，不是买卖指令。默认阈值是可回测的起点，不是已经证明有效的参数。
+输出是研究候选，不是买卖指令。默认参数是可回测的起点，不是已证明有效的参数。
 
-## 解决了什么
+## 两类筛选模式
 
-- 股票池覆盖 `600/601/603/605/000/001/002/003`，包含深市 `002`、`003`。
-- 股票列表按代码字段稳定分页，并检查分页重复和覆盖率。
-- 使用 `exchange_calendars` 的 `XSHG` 交易日历判断最新完整交易日。
-- 交易日 15:10 前只使用上一交易日，15:10 后才接受当天日线。
-- K 线最后日期落后的股票标记为 `stale_hist`，不会参与策略。
-- 历史策略数据只接受东方财富前复权 `fqt=1`；多 host 只做同源容灾。
-- 股票列表接口不可用且没有缓存时，可用新浪批量报价扫描代码和名称；该兜底不提供策略 K 线。
-- 缓存元数据包含来源、复权方式、schema、起始日期和最后完整交易日。
-- RSI 正确处理连续上涨为 100、横盘为 50。
-- 压力位和成交量基准都排除当前 K 线。
-- 趋势、位置、量价、收缩、相对强度、流动性分别计分并各自封顶。
-- 全量候选和 Top N 分开保存，报告中的候选数不受 Top N 截断。
-- 候选跨日保留 `SETUP/TRIGGER/RETEST/INVALID/EXPIRED` 状态。
-- 回测与每日扫描复用同一指标和信号函数。
+### 1. 强资金运作型（埋伏吸筹末期）
 
-## 四类输出
+目标是发现仍处在平台或启动边缘、但量价行为已经出现资金主导痕迹的股票。模型按五组证据评分，不要求所有形态同时发生：
 
-| 文件前缀 | 含义 |
-| --- | --- |
-| `setup_contraction` | 突破前，接近前高，至少两项波动/布林带/成交量收缩 |
-| `setup_accumulation` | 突破前，上涨量强于下跌量，OBV 改善，相对强度较高 |
-| `breakout_today` | 当天刚越过排除当前 K 线的 20 日前高，且没有明显追高或一字板 |
-| `retest_after_breakout` | 突破后 2 至 10 个交易日缩量回踩突破位并收强 |
+- 平台结构：中低位、20 日区间相对 60 日区间收敛、关键压力位反复测试、120 日涨幅不过热。
+- 量价与成本代理：上涨量优于下跌量、OBV 改善、温和换手、低位换手峰、60 日成交量加权成本离散度较低、中小流通盘轻量加分。
+- 行为与波动：ATR/布林带/成交量至少两项收缩、假跌破快速收回、下沿承接、上影试盘、压缩后定向扩张。
+- 独立性：20/60 日相对沪深300更强，在全市场横截面中的相对强度较高。
+- 风险：突破后 1 至 3 日快速跌回平台、爆量大振幅但价格停滞、近 5 日派发型 K 线会扣分或拦截。
 
-每类同时生成 `_all.csv` 和 `_top100.csv`。观察池在 `watchlist_active.csv`，状态迁移在 `state_transitions.csv`。
+默认硬门槛只保留历史长度、流动性、基础数据、不过度上涨、无明显快速失败和最低分数。其余条件通过证据组与总分表达，避免多个布尔条件连续相与造成过度漏股。
+
+### 2. 强资金运作型（主升浪阶段）
+
+目标是发现趋势已经形成、当日出现短线资金重新发力的股票：
+
+- 核心趋势：收盘价在 MA60 上方、MA60 向上、收盘价在 MA20 上方且 MA20 高于 MA30。
+- 趋势加分：MA5 > MA20 > MA30、多条均线斜率向上。
+- 资金触发：阳线上穿 MA5；为避免漏掉连续主升，也接受收盘在 MA5 上方、阳线且 MACD 柱继续增强。
+- 量价配合：上涨量优于下跌量、上涨日量能合理放大、近期回调量低于 20 日基准、OBV 改善。
+- 环境与风险：沪深300没有系统性破位、不过度偏离 MA20、10 日涨幅不过热、无明显快速失败或派发风险。
+
+行业没有走坏属于可选加分证据，不会因为缺少可靠行业历史数据而直接淘汰股票。
+
+## 资金、筹码和基本面数据边界
+
+仅靠日线 OHLCV 不能可靠还原真实筹码分布，也不能推导龙虎榜机构席位、融资余额、股东户数、减持公告或行业利润增速。程序不会伪造这些字段：
+
+- `cost_concentration_60_pct` 是 60 日成交量加权成交成本离散度代理，不是真实筹码分布。
+- `main_net_inflow_ratio_pct` 可从当日股票池快照获取；接口不可用时保持缺失。
+- 龙虎榜、融资、股东、财务和减持信息通过可选 CSV 导入，只影响评分，不是硬条件。
+- “套牢盘小于 30%”目前未实现，因为免费日线数据不足以严谨计算。
+
+可将 [示例文件](examples/funding_signals.example.csv) 放到：
+
+```text
+DATA_DIR/external/funding_signals.csv
+```
+
+字段如下：
+
+| 字段 | 含义 | 评分规则 |
+| --- | --- | --- |
+| `code`, `date` | 股票代码、证据有效日期 | 每只股票只取筛选日及之前的最新一行 |
+| `main_net_inflow_ratio_pct` | 主力净流入/成交额 | 大于等于 20% 加分 |
+| `main_net_inflow_positive_days_5` | 最近 5 日主力净流入为正的天数 | 等于 5 加分 |
+| `institution_net_buy_amount` | 龙虎榜机构净买额 | 大于等于 5000 万加分 |
+| `margin_balance_growth_3d_pct` | 融资余额 3 日增幅 | 大于等于 10% 加分 |
+| `shareholder_count_change_pct` | 股东户数变化 | 小于等于 -5% 加分 |
+| `sector_profit_growth_median_pct` | 板块利润增速中位数 | 大于等于 20% 加分 |
+| `industry_risk_ok` | 行业是否未明显走坏，1/0 | 1 轻量加分 |
+| `has_reduction_plan` | 是否存在减持计划，1/0 | 1 扣分 |
+
+未来日期的数据会被忽略，缺失值保持中性。
+
+## 为什么有时只有 0 至 2 只
+
+不能只凭候选数量判断“股市不行”或“条件太严”。按以下顺序看：
+
+1. 看终端和 `coverage_report.json`。覆盖率低于 90% 时先排查抓取，空结果不能解释为市场结论。
+2. 看 `screening_funnel.csv`。若大量股票最后只卡在 `埋伏型评分` 或 `主升浪评分`，阈值可能偏严；若早期就卡在趋势共振、位置或风险，说明当日真正匹配该形态的股票较少。
+3. 同一交易日分别运行默认和高召回配置。高召回结果明显增加，说明参数选择性较强；两个配置都很少，才更支持“当日匹配结构少”的判断。
+4. 看 `near_miss_top100.csv` 的分项得分，不要为了增加数量把所有阈值一起放宽。
+5. 最终用滚动样本外回测比较命中率、最大回撤、候选数量和不同市场阶段的稳定性。
 
 ## Colab 使用
 
-推荐把 **代码放 GitHub**，把 `cache/state/runs/backtests` 放 Google Drive。否则 Colab 运行时重启后会丢失缓存和跨日观察状态。
-
 1. 将整个仓库上传到 GitHub。
-2. 在 Colab 打开 `notebooks/colab_daily_scan.ipynb`。
-3. 修改第一段代码中的 `REPO_URL`。
-4. 运行全部单元格并授权挂载 Google Drive。
+2. 打开 `notebooks/colab_daily_scan.ipynb`。
+3. 修改 `REPO_URL`，挂载 Google Drive 后运行全部单元格。
+4. 默认使用 `config/default.yaml`；需要对比召回率时改为 `config/high_recall.yaml`。
 
-扫描结束后会直接在 Colab 输出四类候选、关键指标、筛选漏斗和最接近入选的股票。`CONFIG_PATH` 默认为严格的 `config/default.yaml`；需要扩大观察池时可改为 `config/high_recall.yaml`。
+CLI 在扫描完成后会直接打印两类候选、筛选漏斗和近似入选股。Notebook 也会把两类完整结果的前 100 行显示出来。空 CSV 只有表头表示当日确实没有入选，不表示保存失败。
 
-首次运行需要抓取全市场历史数据，后续交易日会优先复用已到最新完整交易日的缓存。由于采用前复权，缓存 schema 或起始日期改变时会自动失效并重抓。
+首次运行会下载全市场历史数据，后续优先复用缓存。建议代码保存在 GitHub，以下目录保存在 Drive：
 
-## 本地使用
+```text
+cache/
+external/
+state/
+runs/
+backtests/
+```
+
+## 本地运行
 
 ```bash
 python -m pip install -e .
 python -m ashare_scanner --config config/default.yaml expected-date
-python -m ashare_scanner --config config/default.yaml --data-dir data run
+python -m ashare_scanner --config config/default.yaml --data-dir data run --print-top 30
 ```
 
-收盘后测试指定时间：
+高召回对照：
 
 ```bash
-python -m ashare_scanner --config config/default.yaml --data-dir data run \
-  --as-of "2026-07-15T15:20:00+08:00"
+python -m ashare_scanner --config config/high_recall.yaml --data-dir data run --print-top 50
 ```
 
-回测使用扫描器已经建立的历史缓存：
+使用已建立的历史缓存回测：
 
 ```bash
 python -m ashare_scanner --config config/default.yaml --data-dir data backtest \
   --start 2024-01-01 --end 2025-12-31
 ```
 
-## 每次扫描的结果
+## 每次扫描结果
 
 结果位于 `DATA_DIR/runs/YYYY-MM-DD/`：
 
-- `universe.csv`：当日主板股票池。
-- `fetch_status.csv`：每只股票的抓取状态、日期、来源和错误。
-- `indicators_scored.csv`：完整指标和六类因子分数。
-- `<signal>_all.csv`：符合该信号的全部股票。
-- `<signal>_top100.csv`：便于人工查看的 Top 榜。
-- `watchlist_active.csv`：跨日活跃观察池。
-- `state_transitions.csv`：本次状态变化。
-- `screening_funnel.csv`：四类策略每一步还剩多少股票。
-- `near_miss_top100.csv`：没有入选但最接近通过完整条件的股票及失败步骤。
-- `coverage_report.json`：覆盖率、失败明细、真实候选数量和自动诊断。
+- `accumulation_late_all.csv`：埋伏吸筹末期的全部候选。
+- `main_wave_all.csv`：主升浪阶段的全部候选。
+- 对应的 `_top100.csv`：便于查看的排名结果，不影响全量候选数。
+- `indicators_scored.csv`：所有有效股票的指标、分项得分和两类总分。
+- `screening_funnel.csv`：每个硬门槛后剩余数量。
+- `near_miss_top100.csv`：最接近入选的股票及首个未通过步骤。
+- `fetch_status.csv`：抓取、历史长度和最新日期状态。
+- `coverage_report.json`：覆盖率、真实候选数、外部证据状态和自动诊断。
+- `watchlist_active.csv`、`state_transitions.csv`：跨日观察状态。
 
-持久状态位于 `DATA_DIR/state/`，历史缓存位于 `DATA_DIR/cache/`。`watchlist_active.csv` 只有表头或没有数据行，表示当天及历史有效期内没有活跃候选，不代表抓取一定失败；先检查 `coverage_report.json` 的覆盖率和 `fetch_status.csv`。
+## 配置原则
 
-## 回测口径
+`config/default.yaml` 使用中等召回设置；`config/high_recall.yaml` 只用于对照和扩充观察池。优先一次只调整一个维度，并通过回测观察变化：
 
-默认把信号日的下一个交易日开盘价作为入场价。如果随后 10 个交易日内最高价达到 `+12%`，且达到目标之前的最低价回撤不超过 `-6%`，则记为成功。
+- `accumulation_score_min`、`main_wave_score_min`：两类最低分数。
+- `accumulation_min_evidence_groups`：埋伏型至少需要多少组独立证据。
+- `accumulation_max_position_250`：埋伏型允许的长期区间位置。
+- `main_wave_max_extension_ma20_pct`：主升型允许偏离 MA20 的最大幅度。
+- `min_amount_ma20`：20 日平均成交额门槛。
+- `top_n`：只控制 Top 文件和展示，不截断 `_all.csv`。
 
-输出包括：
+## 数据与研究限制
 
-- 观察级 precision 和 recall；
-- 每类信号 precision；
-- 每日只看 Top 20/50/100 时的 recall；
-- 每条信号的未来最高涨幅和目标前回撤。
-
-当前免费数据回测仍有明确限制：使用当前缓存股票池，存在幸存者偏差；没有历史行业成分；没有模拟涨停排队深度、佣金和滑点。要用于资金决策，应接入带退市股票、历史成分和公司行动时点的商业数据，再做滚动样本外验证。
-
-## 配置建议
-
-主要参数在 `config/default.yaml`。默认配置选择性较强：流动性、趋势、不过度上涨、前高位置、相对强度及各策略专属量价条件必须同时成立，因此单日 0 至几只并不异常，但不能仅凭候选少断定市场差。
-
-`config/high_recall.yaml` 是更宽松的观察池配置，会降低流动性和相对强度门槛、扩大前高距离及突破量比范围。它会增加误报，应该与默认配置分别回测，而不是把候选数量多当成策略更好。
-
-```bash
-python -m ashare_scanner --config config/high_recall.yaml --data-dir data run
-```
-
-- `min_amount_ma20` 应按资金规模调整。
-- `setup_min_rs_percentile` 越低，观察池召回率通常越高，误报也越多。
-- `top_n` 只控制人工查看榜，不会截断全量候选。
-- `force_refresh` 仅用于排查缓存或数据源问题，不建议日常开启。
-
-## 数据源边界
-
-行情接口属于未承诺稳定性的公开 Web 接口，可能限流或变更。程序会记录失败并拒绝陈旧数据，但不能保证数据源永久可用。行业强度默认没有加入评分，因为免费来源缺少可靠的历史行业归属；用当前行业标签回填历史会引入未来信息。
-
-## 免责声明
-
-本项目只用于数据工程和量化研究，不构成投资建议。任何实盘使用都需要自行验证数据授权、复权正确性、交易限制、手续费、滑点和风险控制。
+公开 Web 接口可能限流或变更；项目会记录来源、覆盖率和失败原因，但不能保证永久可用。当前回测使用现有缓存股票池，存在幸存者偏差，也未模拟涨停排队深度、佣金、滑点、公告可用时间和完整行业历史。实盘使用前必须自行验证数据授权、复权一致性、交易限制和风险控制。

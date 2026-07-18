@@ -23,35 +23,79 @@ def calc_rsi(close: pd.Series, window: int = 14) -> pd.Series:
 def _recent_breakout_features(frame: pd.DataFrame, lookback: int = 10) -> None:
     levels = np.full(len(frame), np.nan)
     bars_since = np.full(len(frame), np.nan)
+    event_lows = np.full(len(frame), np.nan)
+    event_closes = np.full(len(frame), np.nan)
     last_index: int | None = None
     last_level = np.nan
+    last_low = np.nan
+    last_close = np.nan
     events = frame["breakout_20"].fillna(False).to_numpy(dtype=bool)
     prior_highs = frame["prior_high_20"].to_numpy(dtype=float)
+    lows = frame["low"].to_numpy(dtype=float)
+    closes = frame["close"].to_numpy(dtype=float)
     for index, event in enumerate(events):
         if event:
             last_index = index
             last_level = prior_highs[index]
+            last_low = lows[index]
+            last_close = closes[index]
         if last_index is not None and index - last_index <= lookback:
             levels[index] = last_level
             bars_since[index] = index - last_index
+            event_lows[index] = last_low
+            event_closes[index] = last_close
     frame["recent_breakout_level"] = levels
     frame["bars_since_breakout"] = bars_since
+    frame["breakout_event_low"] = event_lows
+    frame["breakout_event_close"] = event_closes
     frame["retest_distance_pct"] = (frame["close"] / frame["recent_breakout_level"] - 1) * 100
     frame["retest_touch"] = (
         (frame["low"] <= frame["recent_breakout_level"] * 1.02)
         & (frame["close"] >= frame["recent_breakout_level"] * 0.985)
     ).astype(int)
+    early_retest = frame["bars_since_breakout"].between(1, 3, inclusive="both")
+    frame["breakout_failed_fast"] = (
+        early_retest
+        & (
+            (frame["close"] < frame["recent_breakout_level"] * 0.98)
+            | (frame["close"] < frame["breakout_event_low"])
+        )
+    ).astype(int)
+
+
+def _cost_concentration_proxy(frame: pd.DataFrame, window: int = 60) -> None:
+    typical = (frame["high"] + frame["low"] + frame["close"]) / 3
+    rolling_volume = frame["volume"].rolling(window, min_periods=30).sum()
+    first_moment = (typical * frame["volume"]).rolling(window, min_periods=30).sum()
+    second_moment = ((typical**2) * frame["volume"]).rolling(window, min_periods=30).sum()
+    center = first_moment / rolling_volume.replace(0, np.nan)
+    variance = (second_moment / rolling_volume.replace(0, np.nan) - center**2).clip(lower=0)
+    frame["cost_center_60"] = center
+    frame["cost_concentration_60_pct"] = variance.pow(0.5) / center * 100
+    frame["distance_to_cost_center_pct"] = (frame["close"] / center - 1) * 100
 
 
 def compute_indicators(history: pd.DataFrame) -> pd.DataFrame:
     frame = history.copy()
     frame["date"] = pd.to_datetime(frame["date"], errors="coerce")
     for column in PRICE_COLUMNS:
+        if column not in frame:
+            frame[column] = np.nan
+        frame[column] = pd.to_numeric(frame[column], errors="coerce")
+    for column in ("pct_chg", "turnover", "amplitude"):
+        if column not in frame:
+            frame[column] = np.nan
         frame[column] = pd.to_numeric(frame[column], errors="coerce")
     frame = frame.dropna(subset=["date", "open", "high", "low", "close", "volume"])
     frame = frame.drop_duplicates("date", keep="last").sort_values("date").reset_index(drop=True)
 
-    for window in (5, 10, 20, 60, 120):
+    previous_close = frame["close"].shift(1)
+    calculated_pct = frame["close"].pct_change(fill_method=None) * 100
+    calculated_amplitude = (frame["high"] - frame["low"]) / previous_close * 100
+    frame["pct_chg"] = frame["pct_chg"].fillna(calculated_pct)
+    frame["amplitude"] = frame["amplitude"].fillna(calculated_amplitude)
+
+    for window in (5, 10, 20, 30, 60, 120):
         frame[f"ma{window}"] = frame["close"].rolling(window, min_periods=window).mean()
 
     ema_fast = frame["close"].ewm(span=12, adjust=False).mean()
@@ -63,7 +107,9 @@ def compute_indicators(history: pd.DataFrame) -> pd.DataFrame:
     frame["dif_slope_3_pct"] = (frame["dif"] - frame["dif"].shift(3)) / frame["close"] * 100
     frame["rsi14"] = calc_rsi(frame["close"], 14)
 
+    frame["prior_high_5"] = frame["high"].rolling(5, min_periods=5).max().shift(1)
     frame["prior_high_20"] = frame["high"].rolling(20, min_periods=20).max().shift(1)
+    frame["prior_low_20"] = frame["low"].rolling(20, min_periods=20).min().shift(1)
     frame["prior_high_60"] = frame["high"].rolling(60, min_periods=60).max().shift(1)
     frame["dist_to_prior_high20_pct"] = (frame["close"] / frame["prior_high_20"] - 1) * 100
     frame["dist_to_prior_high60_pct"] = (frame["close"] / frame["prior_high_60"] - 1) * 100
@@ -71,6 +117,7 @@ def compute_indicators(history: pd.DataFrame) -> pd.DataFrame:
         (frame["close"] > frame["prior_high_20"])
         & (frame["close"].shift(1) <= frame["prior_high_20"].shift(1))
     ).astype(int)
+    frame["close_above_prior_high5"] = (frame["close"] > frame["prior_high_5"]).astype(int)
 
     frame["vma20_prev"] = frame["volume"].rolling(20, min_periods=20).mean().shift(1)
     frame["amount_ma20_prev"] = frame["amount"].rolling(20, min_periods=20).mean().shift(1)
@@ -78,8 +125,9 @@ def compute_indicators(history: pd.DataFrame) -> pd.DataFrame:
     recent_volume = frame["volume"].rolling(5, min_periods=5).mean()
     preceding_volume = frame["volume"].shift(5).rolling(20, min_periods=20).mean()
     frame["volume_contraction_5_20"] = recent_volume / preceding_volume
+    frame["turnover_ma20_prev"] = frame["turnover"].rolling(20, min_periods=10).mean().shift(1)
+    frame["turnover_ratio_20"] = frame["turnover"] / frame["turnover_ma20_prev"].replace(0, np.nan)
 
-    previous_close = frame["close"].shift(1)
     true_range = pd.concat(
         [
             frame["high"] - frame["low"],
@@ -97,6 +145,9 @@ def compute_indicators(history: pd.DataFrame) -> pd.DataFrame:
     frame["bb_width_pct"] = std20 * 4 / frame["ma20"] * 100
     frame["bb_width_mean20_prev"] = frame["bb_width_pct"].rolling(20, min_periods=20).mean().shift(1)
     frame["bb_contraction_ratio"] = frame["bb_width_pct"] / frame["bb_width_mean20_prev"]
+    prior_compressed = frame["atr_contraction_ratio"].shift(1) <= 0.90
+    expanding_now = frame["atr_pct"] >= frame["atr_pct"].shift(1) * 1.10
+    frame["contraction_then_expansion"] = (prior_compressed & expanding_now).astype(int)
 
     direction = np.sign(frame["close"].diff()).fillna(0)
     up_volume = frame["volume"].where(direction > 0, 0.0).rolling(10, min_periods=10).sum()
@@ -109,23 +160,117 @@ def compute_indicators(history: pd.DataFrame) -> pd.DataFrame:
     obv = (direction * frame["volume"]).cumsum()
     volume20_sum = frame["volume"].rolling(20, min_periods=20).sum()
     frame["obv_slope_10_pct"] = (obv - obv.shift(10)) / volume20_sum * 100
+    down_day = frame["close"] < previous_close
+    down_volume_5 = frame["volume"].where(down_day).rolling(5, min_periods=1).mean()
+    frame["pullback_volume_ratio_5"] = down_volume_5 / frame["vma20_prev"]
 
     frame["return_5d_pct"] = frame["close"].pct_change(5, fill_method=None) * 100
     frame["return_10d_pct"] = frame["close"].pct_change(10, fill_method=None) * 100
     frame["return_20d_pct"] = frame["close"].pct_change(20, fill_method=None) * 100
     frame["return_60d_pct"] = frame["close"].pct_change(60, fill_method=None) * 100
+    frame["return_120d_pct"] = frame["close"].pct_change(120, fill_method=None) * 100
     frame["extension_ma20_pct"] = (frame["close"] / frame["ma20"] - 1) * 100
+    frame["extension_ma60_pct"] = (frame["close"] / frame["ma60"] - 1) * 100
+    frame["ma5_slope_3_pct"] = frame["ma5"].pct_change(3, fill_method=None) * 100
     frame["ma20_slope_5_pct"] = frame["ma20"].pct_change(5, fill_method=None) * 100
+    frame["ma30_slope_5_pct"] = frame["ma30"].pct_change(5, fill_method=None) * 100
     frame["ma60_slope_5_pct"] = frame["ma60"].pct_change(5, fill_method=None) * 100
+    frame["bull_alignment_5_20_30"] = (
+        (frame["close"] > frame["ma5"])
+        & (frame["ma5"] > frame["ma20"])
+        & (frame["ma20"] > frame["ma30"])
+        & (frame["close"] > frame["ma60"])
+    ).astype(int)
+    frame["cross_ma5_up"] = (
+        (frame["close"] > frame["ma5"])
+        & (frame["close"].shift(1) <= frame["ma5"].shift(1))
+        & (frame["close"] > frame["open"])
+    ).astype(int)
 
-    high10 = frame["high"].rolling(10, min_periods=10).max()
-    low10 = frame["low"].rolling(10, min_periods=10).min()
-    frame["range_position_10"] = (frame["close"] - low10) / (high10 - low10).replace(0, np.nan)
+    rolling_ranges: dict[int, pd.Series] = {}
+    for window in (10, 20, 60, 120):
+        high = frame["high"].rolling(window, min_periods=window).max()
+        low = frame["low"].rolling(window, min_periods=window).min()
+        rolling_ranges[window] = (high / low.replace(0, np.nan) - 1) * 100
+        frame[f"range_width_{window}_pct"] = rolling_ranges[window]
+    frame["range_convergence_ratio_20_60"] = rolling_ranges[20] / rolling_ranges[60].replace(0, np.nan)
+
+    for window, minimum in ((120, 80), (250, 120)):
+        high = frame["high"].rolling(window, min_periods=minimum).max()
+        low = frame["low"].rolling(window, min_periods=minimum).min()
+        frame[f"position_{window}"] = (frame["close"] - low) / (high - low).replace(0, np.nan)
+
+    bar_range = (frame["high"] - frame["low"]).replace(0, np.nan)
+    body_high = pd.concat([frame["open"], frame["close"]], axis=1).max(axis=1)
+    body_low = pd.concat([frame["open"], frame["close"]], axis=1).min(axis=1)
+    frame["upper_wick_ratio"] = (frame["high"] - body_high) / bar_range
+    frame["lower_wick_ratio"] = (body_low - frame["low"]) / bar_range
+    upper_probe = (
+        (frame["upper_wick_ratio"] >= 0.40)
+        & (frame["high"] >= frame["prior_high_20"] * 0.985)
+        & (frame["vol_ratio_20"] >= 0.80)
+    )
+    false_break_recovery = (
+        (frame["low"] < frame["prior_low_20"] * 0.995)
+        & (frame["close"] > frame["prior_low_20"])
+        & (frame["lower_wick_ratio"] >= 0.30)
+    )
+    support_acceptance = (
+        (frame["low"] <= frame["prior_low_20"] * 1.03)
+        & (frame["lower_wick_ratio"] >= 0.30)
+        & (frame["close"] >= frame["open"])
+        & (frame["vol_ratio_20"] >= 0.75)
+    )
+    resistance_test = (
+        (frame["high"] >= frame["prior_high_20"] * 0.985)
+        & (frame["high"] <= frame["prior_high_20"] * 1.03)
+    )
+    frame["upper_probe"] = upper_probe.astype(int)
+    frame["false_break_recovery"] = false_break_recovery.astype(int)
+    frame["support_acceptance"] = support_acceptance.astype(int)
+    frame["resistance_test"] = resistance_test.astype(int)
+    frame["upper_probe_count_60"] = upper_probe.rolling(60, min_periods=20).sum()
+    frame["false_break_recovery_count_60"] = false_break_recovery.rolling(60, min_periods=20).sum()
+    frame["support_acceptance_count_60"] = support_acceptance.rolling(60, min_periods=20).sum()
+    frame["resistance_test_count_60"] = resistance_test.rolling(60, min_periods=20).sum()
+
+    low_turnover_peak = (
+        (frame["position_120"] <= 0.60)
+        & (frame["turnover_ratio_20"] >= 1.50)
+        & (frame["close"] >= frame["open"])
+    )
+    frame["low_position_turnover_peak"] = low_turnover_peak.astype(int)
+    frame["low_position_turnover_peak_count_60"] = low_turnover_peak.rolling(60, min_periods=20).sum()
+
+    frame["amplitude_ma20_prev"] = frame["amplitude"].rolling(20, min_periods=10).mean().shift(1)
+    distribution = (
+        (frame["turnover_ratio_20"] >= 1.80)
+        & (frame["amplitude"] >= frame["amplitude_ma20_prev"] * 1.40)
+        & (frame["pct_chg"] <= 1.0)
+        & (frame["upper_wick_ratio"] >= 0.25)
+    )
+    frame["distribution_day"] = distribution.astype(int)
+    frame["distribution_day_count_5"] = distribution.rolling(5, min_periods=1).sum()
+
+    _cost_concentration_proxy(frame)
+    _recent_breakout_features(frame)
+    frame["breakout_stall_distribution"] = (
+        frame["bars_since_breakout"].between(1, 3, inclusive="both")
+        & (frame["turnover_ratio_20"] >= 1.50)
+        & (frame["amplitude"] >= frame["amplitude_ma20_prev"] * 1.30)
+        & (frame["close"] <= frame["breakout_event_close"] * 1.01)
+    ).astype(int)
+
+    frame["range_position_10"] = (
+        frame["close"] - frame["low"].rolling(10, min_periods=10).min()
+    ) / (
+        frame["high"].rolling(10, min_periods=10).max()
+        - frame["low"].rolling(10, min_periods=10).min()
+    ).replace(0, np.nan)
     frame["one_price_limit"] = (
         np.isclose(frame["high"], frame["low"], rtol=0, atol=0.001)
         & (frame["pct_chg"] >= 9.5)
     ).astype(int)
-    _recent_breakout_features(frame)
     return frame
 
 

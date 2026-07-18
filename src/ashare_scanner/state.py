@@ -12,10 +12,8 @@ from .calendar import session_offset, sessions_between
 
 ACTIVE_STATES = {"SETUP", "TRIGGER", "RETEST"}
 SIGNAL_TO_STATE = {
-    "setup_contraction": "SETUP",
-    "setup_accumulation": "SETUP",
-    "breakout_today": "TRIGGER",
-    "retest_after_breakout": "RETEST",
+    "accumulation_late": "SETUP",
+    "main_wave": "TRIGGER",
 }
 STATE_PRIORITY = {"SETUP": 1, "TRIGGER": 2, "RETEST": 3}
 WATCHLIST_COLUMNS = [
