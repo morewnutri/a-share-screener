@@ -69,7 +69,10 @@ class Backtester:
         benchmark_read = self.cache.read(benchmark_key, end, source_kind="benchmark")
         if benchmark_read.frame.empty:
             raise RuntimeError("Benchmark cache is missing. Run the daily scanner first.")
-        benchmark = compute_indicators(benchmark_read.frame).set_index("date")
+        benchmark = compute_indicators(
+            benchmark_read.frame,
+            include_chips=False,
+        ).set_index("date")
 
         universe_cache = UniverseCache(self.data_dir / "cache")
         universe_read = universe_cache.read(end, max_age_hours=10**6)

@@ -3,6 +3,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from .chips import compute_modeled_cyq
+
 
 PRICE_COLUMNS = ("open", "high", "low", "close", "volume", "amount")
 
@@ -75,7 +77,12 @@ def _cost_concentration_proxy(frame: pd.DataFrame, window: int = 60) -> None:
     frame["distance_to_cost_center_pct"] = (frame["close"] / center - 1) * 100
 
 
-def compute_indicators(history: pd.DataFrame) -> pd.DataFrame:
+def compute_indicators(
+    history: pd.DataFrame,
+    *,
+    include_chips: bool = True,
+    chip_latest_only: bool = False,
+) -> pd.DataFrame:
     frame = history.copy()
     frame["date"] = pd.to_datetime(frame["date"], errors="coerce")
     for column in PRICE_COLUMNS:
@@ -187,6 +194,43 @@ def compute_indicators(history: pd.DataFrame) -> pd.DataFrame:
         & (frame["close"] > frame["open"])
     ).astype(int)
 
+    # Measure the platform before the latest three bars so an early launch does
+    # not inflate the consolidation range it is supposed to break from.
+    base_close = frame["close"].shift(3)
+    base_high = frame["high"].shift(3).rolling(20, min_periods=20).max()
+    base_low = frame["low"].shift(3).rolling(20, min_periods=20).min()
+    base_mean = frame["close"].shift(3).rolling(20, min_periods=20).mean()
+    base_std = frame["close"].shift(3).rolling(20, min_periods=20).std(ddof=0)
+    frame["base_high_20_pre3"] = base_high
+    frame["base_low_20_pre3"] = base_low
+    frame["base_mid_20_pre3"] = (base_high + base_low) / 2
+    frame["base_width_20_pre3_pct"] = (base_high / base_low.replace(0, np.nan) - 1) * 100
+    frame["base_close_cv_20_pre3_pct"] = base_std / base_mean * 100
+    frame["base_return_20_pre3_pct"] = (base_close / frame["close"].shift(22) - 1) * 100
+    frame["base_turnover_sum_20_pre3_pct"] = frame["turnover"].shift(3).rolling(
+        20, min_periods=15
+    ).sum()
+    prior_high_120_pre3 = frame["high"].shift(3).rolling(120, min_periods=80).max()
+    prior_low_120_pre3 = frame["low"].shift(3).rolling(120, min_periods=80).min()
+    frame["base_drawdown_from_120_high_pct"] = (base_close / prior_high_120_pre3 - 1) * 100
+    frame["base_position_120_pre3"] = (
+        frame["base_mid_20_pre3"] - prior_low_120_pre3
+    ) / (prior_high_120_pre3 - prior_low_120_pre3).replace(0, np.nan)
+    frame["pre_base_decline_60_pct"] = (
+        frame["close"].shift(22) / frame["close"].shift(82) - 1
+    ) * 100
+    frame["distance_from_base_high_pct"] = (frame["close"] / base_high - 1) * 100
+    frame["distance_from_base_mid_pct"] = (
+        frame["close"] / frame["base_mid_20_pre3"] - 1
+    ) * 100
+    frame["early_launch_price_action"] = (
+        (frame["return_5d_pct"].between(3, 35, inclusive="both"))
+        & (frame["close"] > frame["ma5"])
+        & (frame["ma5_slope_3_pct"] > 0)
+        & (frame["distance_from_base_mid_pct"] >= 4)
+        & (frame["distance_from_base_high_pct"].between(-4, 35, inclusive="both"))
+    ).astype(int)
+
     rolling_ranges: dict[int, pd.Series] = {}
     for window in (10, 20, 60, 120):
         high = frame["high"].rolling(window, min_periods=window).max()
@@ -252,6 +296,7 @@ def compute_indicators(history: pd.DataFrame) -> pd.DataFrame:
     frame["distribution_day"] = distribution.astype(int)
     frame["distribution_day_count_5"] = distribution.rolling(5, min_periods=1).sum()
 
+    frame = frame.copy()
     _cost_concentration_proxy(frame)
     _recent_breakout_features(frame)
     frame["breakout_stall_distribution"] = (
@@ -271,7 +316,13 @@ def compute_indicators(history: pd.DataFrame) -> pd.DataFrame:
         np.isclose(frame["high"], frame["low"], rtol=0, atol=0.001)
         & (frame["pct_chg"] >= 9.5)
     ).astype(int)
-    return frame
+    if not include_chips:
+        return frame
+    chip_features = compute_modeled_cyq(frame, latest_only=chip_latest_only)
+    return pd.concat(
+        [frame.reset_index(drop=True), chip_features.reset_index(drop=True)],
+        axis=1,
+    )
 
 
 def latest_snapshot(indicators: pd.DataFrame, code: str, name: str, source: str) -> dict:

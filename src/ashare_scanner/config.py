@@ -27,15 +27,19 @@ class DataConfig:
 class StrategyConfig:
     top_n: int = 100
     min_amount_ma20: float = 30_000_000
-    accumulation_score_min: float = 55.0
-    accumulation_min_evidence_groups: int = 3
-    accumulation_max_position_250: float = 0.80
-    accumulation_max_return_20d_pct: float = 30.0
-    accumulation_max_extension_ma60_pct: float = 18.0
-    accumulation_max_distribution_days_5: int = 2
-    main_wave_score_min: float = 58.0
-    main_wave_max_extension_ma20_pct: float = 16.0
-    main_wave_max_return_10d_pct: float = 25.0
+    chip_base_ready_score_min: float = 58.0
+    chip_base_launch_score_min: float = 68.0
+    chip_max_position_250: float = 0.70
+    chip_max_base_width_pct: float = 30.0
+    chip_max_base_abs_return_pct: float = 15.0
+    chip_max_70_width_pct: float = 26.0
+    chip_max_peak_position: float = 0.55
+    chip_min_peak_band_share_pct: float = 18.0
+    chip_min_low_zone_share_pct: float = 42.0
+    chip_ready_max_peak_distance_pct: float = 18.0
+    chip_launch_max_peak_distance_pct: float = 45.0
+    chip_launch_max_return_10d_pct: float = 45.0
+    chip_max_distribution_days_5: int = 2
     watchlist_ttl_sessions: int = 12
 
 
@@ -62,15 +66,17 @@ class AppConfig:
         if self.data.max_workers < 1:
             raise ValueError("max_workers must be positive.")
         for value, name in (
-            (self.strategy.accumulation_score_min, "accumulation_score_min"),
-            (self.strategy.main_wave_score_min, "main_wave_score_min"),
+            (self.strategy.chip_base_ready_score_min, "chip_base_ready_score_min"),
+            (self.strategy.chip_base_launch_score_min, "chip_base_launch_score_min"),
         ):
             if not 0 <= value <= 100:
                 raise ValueError(f"{name} must be between 0 and 100.")
-        if not 1 <= self.strategy.accumulation_min_evidence_groups <= 5:
-            raise ValueError("accumulation_min_evidence_groups must be between 1 and 5.")
-        if not 0 < self.strategy.accumulation_max_position_250 <= 1:
-            raise ValueError("accumulation_max_position_250 must be in (0, 1].")
+        for value, name in (
+            (self.strategy.chip_max_position_250, "chip_max_position_250"),
+            (self.strategy.chip_max_peak_position, "chip_max_peak_position"),
+        ):
+            if not 0 < value <= 1:
+                raise ValueError(f"{name} must be in (0, 1].")
         if self.backtest.horizon_sessions < 1:
             raise ValueError("horizon_sessions must be positive.")
 

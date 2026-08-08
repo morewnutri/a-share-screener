@@ -17,15 +17,19 @@ data:
 strategy:
   top_n: 100
   min_amount_ma20: 30000000
-  accumulation_score_min: 55
-  accumulation_min_evidence_groups: 3
-  accumulation_max_position_250: 0.80
-  accumulation_max_return_20d_pct: 30
-  accumulation_max_extension_ma60_pct: 18
-  accumulation_max_distribution_days_5: 2
-  main_wave_score_min: 58
-  main_wave_max_extension_ma20_pct: 16
-  main_wave_max_return_10d_pct: 25
+  chip_base_ready_score_min: 58
+  chip_base_launch_score_min: 68
+  chip_max_position_250: 0.70
+  chip_max_base_width_pct: 30
+  chip_max_base_abs_return_pct: 15
+  chip_max_70_width_pct: 26
+  chip_max_peak_position: 0.55
+  chip_min_peak_band_share_pct: 18
+  chip_min_low_zone_share_pct: 42
+  chip_ready_max_peak_distance_pct: 18
+  chip_launch_max_peak_distance_pct: 45
+  chip_launch_max_return_10d_pct: 45
+  chip_max_distribution_days_5: 2
   watchlist_ttl_sessions: 12
 
 backtest:

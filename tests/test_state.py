@@ -16,8 +16,8 @@ def test_watchlist_update_is_idempotent_for_same_session(tmp_path):
         "ma20": 9.5,
     }
     signals = {
-        "accumulation_late": pd.DataFrame([row]),
-        "main_wave": pd.DataFrame(),
+        "chip_base_ready": pd.DataFrame([row]),
+        "chip_base_launch": pd.DataFrame(),
     }
     indicators = pd.DataFrame([row])
     session = date(2026, 7, 15)
@@ -32,8 +32,8 @@ def test_watchlist_update_is_idempotent_for_same_session(tmp_path):
 
 def test_empty_watchlist_csv_keeps_headers(tmp_path):
     signals = {
-        "accumulation_late": pd.DataFrame(),
-        "main_wave": pd.DataFrame(),
+        "chip_base_ready": pd.DataFrame(),
+        "chip_base_launch": pd.DataFrame(),
     }
     update_watchlist(
         tmp_path,

@@ -7,23 +7,22 @@ import pandas as pd
 
 
 SIGNAL_LABELS = {
-    "accumulation_late": "强资金运作型（埋伏吸筹末期）",
-    "main_wave": "强资金运作型（主升浪阶段）",
+    "chip_base_ready": "低位横盘+筹码峰（待启动）",
+    "chip_base_launch": "低位横盘+筹码峰（刚启动）",
 }
 
 STEP_LABELS = {
     "history_bars": "历史长度",
     "liquidity": "流动性",
-    "tradable_features": "数据/可交易",
-    "accumulation_position": "低位与未过度上涨",
-    "accumulation_risk": "突破失败/派发风险",
-    "evidence_groups": "证据组数量",
-    "accumulation_score": "埋伏型评分",
-    "trend_resonance": "20/30/60日趋势共振",
-    "ma5_funding_trigger": "MA5资金触发",
-    "market_risk": "大盘系统性风险",
-    "wave_risk": "追高/派发风险",
-    "main_wave_score": "主升浪评分",
+    "chip_features_ready": "筹码模型覆盖",
+    "bottom_location": "下跌后低位",
+    "sideways_platform": "启动前横盘",
+    "concentrated_low_chip_peak": "低位集中筹码峰",
+    "risk_control": "失败/派发风险",
+    "waiting_near_peak": "等待启动位置",
+    "early_launch": "刚启动价格行为",
+    "chip_base_ready_score": "待启动评分",
+    "chip_base_launch_score": "刚启动评分",
 }
 
 RESULT_COLUMNS = [
@@ -32,15 +31,19 @@ RESULT_COLUMNS = [
     "name",
     "close",
     "pct_chg",
-    "accumulation_score",
-    "main_wave_score",
-    "accumulation_evidence_groups",
-    "rs20_percentile",
-    "vol_ratio_20",
-    "turnover_ratio_20",
-    "cost_concentration_60_pct",
-    "main_net_inflow_ratio_pct",
-    "distribution_day_count_5",
+    "chip_base_ready_score",
+    "chip_base_launch_score",
+    "base_drawdown_from_120_high_pct",
+    "base_width_20_pre3_pct",
+    "base_return_20_pre3_pct",
+    "chip_peak_price",
+    "chip_peak_distance_pct",
+    "chip_peak_band_share_pct",
+    "chip_70_width_pct",
+    "chip_low_zone_share_pct",
+    "chip_overhead_ratio_pct",
+    "chip_significant_peak_count",
+    "return_5d_pct",
 ]
 
 RESULT_RENAMES = {
@@ -49,15 +52,19 @@ RESULT_RENAMES = {
     "name": "名称",
     "close": "收盘",
     "pct_chg": "涨跌%",
-    "accumulation_score": "埋伏分",
-    "main_wave_score": "主升分",
-    "accumulation_evidence_groups": "证据组",
-    "rs20_percentile": "相对强度",
-    "vol_ratio_20": "量比20",
-    "turnover_ratio_20": "换手比20",
-    "cost_concentration_60_pct": "成本集中代理%",
-    "main_net_inflow_ratio_pct": "主力净流入占比%",
-    "distribution_day_count_5": "近5日派发风险",
+    "chip_base_ready_score": "待启动分",
+    "chip_base_launch_score": "刚启动分",
+    "base_drawdown_from_120_high_pct": "平台前高回撤%",
+    "base_width_20_pre3_pct": "平台宽度%",
+    "base_return_20_pre3_pct": "平台涨跌%",
+    "chip_peak_price": "主筹码峰价",
+    "chip_peak_distance_pct": "距主峰%",
+    "chip_peak_band_share_pct": "峰带筹码%",
+    "chip_70_width_pct": "70%成本宽度",
+    "chip_low_zone_share_pct": "低位筹码%",
+    "chip_overhead_ratio_pct": "上方套牢盘%",
+    "chip_significant_peak_count": "显著峰数",
+    "return_5d_pct": "5日涨幅%",
 }
 
 
@@ -73,15 +80,13 @@ def _print_table(frame: pd.DataFrame, columns: list[str], renames: dict[str, str
     view = frame[available].rename(columns=renames).copy()
     if "代码" in view:
         view["代码"] = view["代码"].astype(str).str.zfill(6)
-    if "相对强度" in view:
-        view["相对强度"] = (view["相对强度"] * 100).round(1)
     numeric_columns = view.select_dtypes(include="number").columns
     view[numeric_columns] = view[numeric_columns].round(2)
     with pd.option_context(
         "display.max_columns",
         None,
         "display.width",
-        220,
+        260,
         "display.max_colwidth",
         24,
     ):
@@ -94,7 +99,7 @@ def print_run_summary(run_dir: str | Path, top_n: int = 20) -> None:
     screening = report.get("screening", {})
     fetch = report.get("fetch", {})
 
-    print("\n" + "=" * 104)
+    print("\n" + "=" * 112)
     print(f"筛选日期: {report.get('expected_complete_session', '')}")
     print(
         f"股票池: {report.get('universe', {}).get('count', 0)} | "
@@ -107,20 +112,15 @@ def print_run_summary(run_dir: str | Path, top_n: int = 20) -> None:
         f"候选率: {screening.get('candidate_rate_pct', 0)}%"
     )
     print(f"诊断: {screening.get('assessment', '')}")
-    external = report.get("external_evidence", {})
-    print(
-        f"外部资金证据: {'已加载' if external.get('loaded') else '未加载'} | "
-        f"匹配股票: {external.get('matched_codes', 0)} | "
-        f"说明: {external.get('note', '')}"
-    )
-    print("=" * 104)
+    print("筹码口径: modeled_cyq（换手衰减+日内三角分布估算，不是真实账户持仓）")
+    print("=" * 112)
 
     counts = report.get("signals", {})
     for signal, label in SIGNAL_LABELS.items():
         frame = _read_csv(run_dir / f"{signal}_all.csv")
         print(f"\n[{label}] 共 {counts.get(signal, len(frame))} 只")
         if frame.empty:
-            print("无符合条件股票。该文件只有表头属于正常结果，不代表保存失败。")
+            print("无符合条件股票。CSV 只有表头属于正常结果，不代表保存失败。")
         else:
             _print_table(frame.head(top_n), RESULT_COLUMNS, RESULT_RENAMES)
 
@@ -135,7 +135,7 @@ def print_run_summary(run_dir: str | Path, top_n: int = 20) -> None:
             )
             print(f"{label}: {stages}")
 
-    if screening.get("unique_candidate_count", 0) <= 5:
+    if screening.get("unique_candidate_count", 0) <= 10:
         near = _read_csv(run_dir / "near_miss_top100.csv")
         if not near.empty:
             print(f"\n[最接近入选的前 {min(top_n, len(near))} 只]")
@@ -145,13 +145,7 @@ def print_run_summary(run_dir: str | Path, top_n: int = 20) -> None:
                 "name",
                 "closest_signal",
                 "failed_at",
-                "accumulation_score",
-                "main_wave_score",
-                "accumulation_evidence_groups",
-                "close",
-                "rs20_percentile",
-                "vol_ratio_20",
-                "distribution_day_count_5",
+                *RESULT_COLUMNS[5:],
             ]
             near_renames = {
                 "near_miss_rank": "排名",
@@ -159,19 +153,15 @@ def print_run_summary(run_dir: str | Path, top_n: int = 20) -> None:
                 "name": "名称",
                 "closest_signal": "最接近策略",
                 "failed_at": "首个未通过",
-                "accumulation_score": "埋伏分",
-                "main_wave_score": "主升分",
-                "accumulation_evidence_groups": "证据组",
-                "close": "收盘",
-                "rs20_percentile": "相对强度",
-                "vol_ratio_20": "量比20",
-                "distribution_day_count_5": "近5日派发风险",
+                **RESULT_RENAMES,
             }
             view = near.head(top_n).copy()
             view["closest_signal"] = view["closest_signal"].map(SIGNAL_LABELS).fillna(
                 view["closest_signal"]
             )
-            view["failed_at"] = view["failed_at"].map(STEP_LABELS).fillna(view["failed_at"])
+            view["failed_at"] = view["failed_at"].map(STEP_LABELS).fillna(
+                view["failed_at"]
+            )
             _print_table(view, near_columns, near_renames)
 
     print(f"\n结果目录: {run_dir}")

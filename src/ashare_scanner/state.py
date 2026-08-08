@@ -12,8 +12,8 @@ from .calendar import session_offset, sessions_between
 
 ACTIVE_STATES = {"SETUP", "TRIGGER", "RETEST"}
 SIGNAL_TO_STATE = {
-    "accumulation_late": "SETUP",
-    "main_wave": "TRIGGER",
+    "chip_base_ready": "SETUP",
+    "chip_base_launch": "TRIGGER",
 }
 STATE_PRIORITY = {"SETUP": 1, "TRIGGER": 2, "RETEST": 3}
 WATCHLIST_COLUMNS = [
@@ -112,10 +112,8 @@ def update_watchlist(
                     "data_status": "ok",
                     "score_total": row.get("score_total", np.nan),
                     "close": row.get("close", np.nan),
-                    "resistance_price": row.get("recent_breakout_level")
-                    if desired_state == "RETEST"
-                    else row.get("prior_high_20"),
-                    "support_price": row.get("ma20", np.nan),
+                    "resistance_price": row.get("base_high_20_pre3", np.nan),
+                    "support_price": row.get("chip_peak_price", np.nan),
                     "expires_date": session_offset(expected, ttl_sessions).isoformat(),
                 }
             )

@@ -12,6 +12,7 @@ import pandas as pd
 
 from .cache import HistoryCache, UniverseCache, atomic_write_csv, atomic_write_json
 from .calendar import expected_complete_session
+from .chips import CHIP_MODEL_NAME
 from .config import AppConfig
 from .datasource import EastmoneyDataSource
 from .enrichment import merge_optional_evidence
@@ -58,7 +59,7 @@ class DailyScanner:
         LOGGER.info("Universe: %d stocks (%s)", len(universe), universe_source)
 
         benchmark = self._get_benchmark(expected)
-        benchmark_indicators = compute_indicators(benchmark)
+        benchmark_indicators = compute_indicators(benchmark, include_chips=False)
         benchmark_by_date = benchmark_indicators.set_index("date")
         benchmark_map20 = benchmark_by_date["return_20d_pct"]
         benchmark_map60 = benchmark_by_date["return_60d_pct"]
@@ -262,7 +263,7 @@ class DailyScanner:
             status["status"] = "insufficient_bars"
             return status, None
 
-        indicator_frame = compute_indicators(history)
+        indicator_frame = compute_indicators(history, chip_latest_only=True)
         snapshot = latest_snapshot(indicator_frame, code, name, source)
         status["status"] = "ok"
         return status, snapshot
@@ -293,9 +294,9 @@ class DailyScanner:
         if coverage < 90:
             assessment = "数据覆盖率低于90%，应先排查抓取失败，不能据此判断策略或市场。"
         elif candidate_rate < 0.2:
-            assessment = "候选率低于0.2%。先看筛选漏斗：主要卡在评分通常表示阈值偏严；两类模型的结构分普遍偏低，才更可能是当日匹配度低。"
+            assessment = "候选率低于0.2%。先看筛选漏斗：主要卡在阶段评分通常表示阈值偏严；大量股票卡在低位、平台或筹码峰结构，才更可能是当日匹配度低。"
         elif candidate_rate < 1.0:
-            assessment = "候选率低于1%，属于选择性较强的结果；结合两个模型的近似入选股和分项得分判断，不要只看数量。"
+            assessment = "候选率低于1%，属于选择性较强的结果；结合两个阶段的近似入选股和分项得分判断，不要只看数量。"
         else:
             assessment = "候选数量不低，但数量不代表有效性，仍需用滚动回测检查命中率、回撤和不同市场阶段的稳定性。"
         funnel_records = [
@@ -320,6 +321,8 @@ class DailyScanner:
             "data_policy": {
                 "stock_adjustment": "forward_adjusted_fqt_1",
                 "history_sources": "eastmoney_multi_host_only",
+                "chip_distribution": CHIP_MODEL_NAME,
+                "chip_distribution_is_account_level_data": False,
                 "incomplete_daily_bars": "discarded",
                 "stale_stock_history": "excluded_from_signals",
             },
@@ -348,4 +351,3 @@ class DailyScanner:
             "active_watchlist_count": int(len(active_watchlist)),
             "disclaimer": "Research output only; strategy thresholds require walk-forward validation.",
         }
-

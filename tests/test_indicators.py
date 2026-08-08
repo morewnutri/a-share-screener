@@ -22,7 +22,7 @@ def test_prior_high_and_volume_baseline_exclude_current_bar(trending_history):
     assert np.isclose(indicators.loc[39, "vma20_prev"], expected_volume)
 
 
-def test_indicator_frame_has_two_model_features(trending_history):
+def test_indicator_frame_has_chip_base_features(trending_history):
     indicators = compute_indicators(trending_history)
     required = {
         "ma30",
@@ -35,6 +35,15 @@ def test_indicator_frame_has_two_model_features(trending_history):
         "cross_ma5_up",
         "breakout_failed_fast",
         "distribution_day_count_5",
+        "base_width_20_pre3_pct",
+        "base_drawdown_from_120_high_pct",
+        "early_launch_price_action",
+        "chip_peak_price",
+        "chip_peak_band_share_pct",
+        "chip_70_width_pct",
+        "chip_low_zone_share_pct",
+        "chip_overhead_ratio_pct",
+        "chip_model",
     }
     assert required.issubset(indicators.columns)
     assert np.isfinite(indicators.iloc[-1]["cost_concentration_60_pct"])

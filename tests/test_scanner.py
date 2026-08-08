@@ -61,12 +61,12 @@ def test_daily_scanner_runs_end_to_end_from_fresh_cache(tmp_path, trending_histo
     assert report["fetch"]["coverage_pct"] == 100.0
     assert report["external_evidence"]["loaded"] is False
     assert (run_dir / "indicators_scored.csv").exists()
-    assert (run_dir / "accumulation_late_all.csv").exists()
-    assert (run_dir / "main_wave_all.csv").exists()
+    assert (run_dir / "chip_base_ready_all.csv").exists()
+    assert (run_dir / "chip_base_launch_all.csv").exists()
     assert (run_dir / "screening_funnel.csv").exists()
     assert (run_dir / "near_miss_top100.csv").exists()
     print_run_summary(run_dir, top_n=5)
     output = capsys.readouterr().out
-    assert "[强资金运作型（埋伏吸筹末期）]" in output
+    assert "[低位横盘+筹码峰（待启动）]" in output
     assert "[筛选漏斗]" in output
-    assert "外部资金证据: 未加载" in output
+    assert "筹码口径: modeled_cyq" in output
