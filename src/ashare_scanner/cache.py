@@ -10,7 +10,7 @@ from typing import Any
 import pandas as pd
 
 
-HISTORY_SCHEMA_VERSION = 3
+HISTORY_SCHEMA_VERSION = 4
 UNIVERSE_SCHEMA_VERSION = 2
 
 
@@ -56,7 +56,9 @@ class HistoryCache:
             compatible = (
                 metadata.get("schema_version") == HISTORY_SCHEMA_VERSION
                 and metadata.get("source_kind") == source_kind
-                and metadata.get("source", "").startswith("eastmoney:")
+                and metadata.get("source", "").startswith(
+                    ("eastmoney:", "tencent:", "baostock:")
+                )
                 and int(metadata.get("fqt", -1)) == expected_fqt
                 and metadata.get("start_date") == self.start_date
             )
@@ -142,4 +144,3 @@ def atomic_write_csv(frame: pd.DataFrame, path: Path) -> None:
 
 def atomic_write_json(data: dict[str, Any], path: Path) -> None:
     _atomic_json(data, path)
-

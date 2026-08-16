@@ -96,6 +96,9 @@ def test_launch_is_measured_against_prelaunch_platform_and_peak():
     assert latest["base_width_20_pre3_pct"] <= 15
     assert latest["base_drawdown_from_120_high_pct"] <= -30
     assert latest["early_launch_price_action"] == 1
+    assert latest["adaptive_base_window"] in (20, 30, 40, 60)
+    assert latest["adaptive_base_width_pct"] <= 15
+    assert latest["adaptive_launch_price_action"] == 1
     assert 10 <= latest["chip_peak_distance_pct"] <= 30
 
 
@@ -128,3 +131,5 @@ def test_rebound_platform_is_found_before_a_longer_rise():
     assert latest["rebound_base_width_pct"] <= 15
     assert latest["distance_from_rebound_base_high_pct"] > 10
     assert latest["rebound_price_action"] == 1
+    assert 3 <= latest["adaptive_base_offset"] <= 30
+    assert latest["adaptive_rebound_price_action"] == 1

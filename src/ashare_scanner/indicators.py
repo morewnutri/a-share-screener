@@ -159,6 +159,102 @@ def _best_recent_platform(
     ) * 100
 
 
+def _adaptive_platform(
+    frame: pd.DataFrame,
+    windows: tuple[int, ...] = (20, 30, 40, 60),
+    offsets: tuple[int, ...] = (0, 3, 5, 8, 12, 16, 20, 25, 30),
+) -> None:
+    """Find a robust multi-horizon base that may still be active or recently ended."""
+    candidates: dict[str, list[pd.Series]] = {
+        "high": [],
+        "low": [],
+        "return": [],
+        "turnover": [],
+        "drawdown": [],
+        "position": [],
+        "pre_decline": [],
+        "quality": [],
+    }
+    candidate_windows: list[int] = []
+    candidate_offsets: list[int] = []
+    for window in windows:
+        for offset in offsets:
+            shifted_close = frame["close"].shift(offset)
+            rolling_close = shifted_close.rolling(window, min_periods=window)
+            # Close quantiles ignore isolated probe wicks and one-day false breaks.
+            high = rolling_close.quantile(0.90)
+            low = rolling_close.quantile(0.10)
+            end_close = shifted_close
+            start_close = frame["close"].shift(offset + window - 1)
+            width = (high / low.replace(0, np.nan) - 1) * 100
+            base_return = (end_close / start_close - 1) * 100
+            turnover = frame["turnover"].shift(offset).rolling(
+                window, min_periods=max(15, int(window * 0.70))
+            ).sum()
+            prior_high = frame["high"].shift(offset).rolling(120, min_periods=80).max()
+            prior_low = frame["low"].shift(offset).rolling(120, min_periods=80).min()
+            midpoint = (high + low) / 2
+            drawdown = (midpoint / prior_high - 1) * 100
+            position = (midpoint - prior_low) / (prior_high - prior_low).replace(0, np.nan)
+            pre_decline = (start_close / frame["close"].shift(offset + window + 59) - 1) * 100
+            # Prefer tight, flat and longer bases; use a small recency penalty.
+            quality = (
+                width
+                + base_return.abs() * 0.55
+                + offset * 0.08
+                + (max(windows) - window) * 0.035
+            )
+            candidates["high"].append(high)
+            candidates["low"].append(low)
+            candidates["return"].append(base_return)
+            candidates["turnover"].append(turnover)
+            candidates["drawdown"].append(drawdown)
+            candidates["position"].append(position)
+            candidates["pre_decline"].append(pre_decline)
+            candidates["quality"].append(quality)
+            candidate_windows.append(window)
+            candidate_offsets.append(offset)
+
+    quality_values = np.column_stack(
+        [series.to_numpy(dtype=float) for series in candidates["quality"]]
+    )
+    valid = np.isfinite(quality_values).any(axis=1)
+    best = np.argmin(np.where(np.isfinite(quality_values), quality_values, np.inf), axis=1)
+    rows = np.arange(len(frame))
+
+    def selected(name: str) -> np.ndarray:
+        values = np.column_stack(
+            [series.to_numpy(dtype=float) for series in candidates[name]]
+        )
+        result = values[rows, best]
+        result[~valid] = np.nan
+        return result
+
+    selected_windows = np.asarray(candidate_windows, dtype=float)[best]
+    selected_offsets = np.asarray(candidate_offsets, dtype=float)[best]
+    selected_windows[~valid] = np.nan
+    selected_offsets[~valid] = np.nan
+    frame["adaptive_base_window"] = selected_windows
+    frame["adaptive_base_offset"] = selected_offsets
+    frame["adaptive_base_high"] = selected("high")
+    frame["adaptive_base_low"] = selected("low")
+    frame["adaptive_base_mid"] = (
+        frame["adaptive_base_high"] + frame["adaptive_base_low"]
+    ) / 2
+    frame["adaptive_base_width_pct"] = (
+        frame["adaptive_base_high"] / frame["adaptive_base_low"].replace(0, np.nan) - 1
+    ) * 100
+    frame["adaptive_base_return_pct"] = selected("return")
+    frame["adaptive_base_turnover_sum_pct"] = selected("turnover")
+    frame["adaptive_base_drawdown_120_pct"] = selected("drawdown")
+    frame["adaptive_base_position_120"] = selected("position")
+    frame["adaptive_pre_base_decline_60_pct"] = selected("pre_decline")
+    frame["adaptive_base_quality"] = selected("quality")
+    frame["distance_from_adaptive_base_high_pct"] = (
+        frame["close"] / frame["adaptive_base_high"] - 1
+    ) * 100
+
+
 def compute_indicators(
     history: pd.DataFrame,
     *,
@@ -306,6 +402,7 @@ def compute_indicators(
         frame["close"] / frame["base_mid_20_pre3"] - 1
     ) * 100
     _best_recent_platform(frame)
+    _adaptive_platform(frame)
     frame["early_launch_price_action"] = (
         (frame["return_5d_pct"].between(3, 35, inclusive="both"))
         & (frame["close"] > frame["ma5"])
@@ -317,6 +414,31 @@ def compute_indicators(
         frame["distance_from_rebound_base_high_pct"].between(-2, 55, inclusive="both")
         & frame["return_20d_pct"].between(3, 60, inclusive="both")
         & (frame["close"] >= frame["ma20"] * 0.95)
+    ).astype(int)
+    trend_votes = (
+        (frame["close"] >= frame["ma5"]).astype(int)
+        + (frame["close"] >= frame["ma10"]).astype(int)
+        + (frame["ma5_slope_3_pct"] > 0).astype(int)
+        + (frame["macd_rising"] == 1).astype(int)
+        + (frame["return_5d_pct"] > 0).astype(int)
+    )
+    frame["adaptive_trend_votes"] = trend_votes
+    frame["adaptive_ready_price_action"] = (
+        (frame["adaptive_base_offset"] <= 8)
+        & frame["distance_from_adaptive_base_high_pct"].between(-12, 22, inclusive="both")
+        & (frame["return_20d_pct"] <= 35)
+    ).astype(int)
+    frame["adaptive_launch_price_action"] = (
+        (frame["adaptive_base_offset"] <= 10)
+        & frame["distance_from_adaptive_base_high_pct"].between(-6, 55, inclusive="both")
+        & frame["return_20d_pct"].between(-2, 60, inclusive="both")
+        & (trend_votes >= 3)
+    ).astype(int)
+    frame["adaptive_rebound_price_action"] = (
+        frame["adaptive_base_offset"].between(8, 30, inclusive="both")
+        & frame["distance_from_adaptive_base_high_pct"].between(-12, 85, inclusive="both")
+        & frame["return_20d_pct"].between(-5, 75, inclusive="both")
+        & (trend_votes >= 2)
     ).astype(int)
     frame = frame.copy()
 

@@ -5,6 +5,7 @@ import logging
 from datetime import date, datetime
 from pathlib import Path
 
+from . import __version__
 from .backtest import Backtester
 from .calendar import expected_complete_session
 from .config import load_config
@@ -18,6 +19,7 @@ def _as_datetime(value: str | None) -> datetime | None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="A-share main-board end-of-day setup scanner")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument("--config", default="config/default.yaml", help="YAML config path")
     parser.add_argument("--data-dir", help="Override persistent data directory")
     parser.add_argument("--log-level", default="INFO", choices=("DEBUG", "INFO", "WARNING", "ERROR"))
@@ -68,4 +70,3 @@ def main(argv: list[str] | None = None) -> int:
             ).isoformat()
         )
     return 0
-

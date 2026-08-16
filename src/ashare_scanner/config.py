@@ -12,9 +12,13 @@ class DataConfig:
     start_date: str = "2022-01-01"
     fqt: int = 1
     min_history_bars: int = 150
-    max_workers: int = 12
+    max_workers: int = 4
     request_timeout: float = 12.0
-    max_retries: int = 3
+    max_retries: int = 2
+    request_min_interval_seconds: float = 0.12
+    baostock_max_retries: int = 2
+    incremental_refresh_days: int = 30
+    min_coverage_pct: float = 90.0
     close_buffer_minutes: int = 10
     universe_cache_hours: int = 24
     min_universe_size: int = 2000
@@ -31,28 +35,28 @@ class DataConfig:
 class StrategyConfig:
     top_n: int = 100
     min_amount_ma20: float = 30_000_000
-    chip_base_ready_score_min: float = 58.0
-    chip_base_launch_score_min: float = 68.0
-    chip_base_rebound_score_min: float = 62.0
-    chip_max_position_250: float = 0.70
-    chip_max_base_width_pct: float = 30.0
-    chip_max_base_abs_return_pct: float = 15.0
-    chip_max_70_width_pct: float = 26.0
-    chip_max_peak_position: float = 0.55
-    chip_min_peak_band_share_pct: float = 18.0
+    chip_base_ready_score_min: float = 48.0
+    chip_base_launch_score_min: float = 55.0
+    chip_base_rebound_score_min: float = 52.0
+    chip_max_position_250: float = 0.92
+    chip_max_base_width_pct: float = 42.0
+    chip_max_base_abs_return_pct: float = 22.0
+    chip_max_70_width_pct: float = 45.0
+    chip_max_peak_position: float = 0.92
+    chip_min_peak_band_share_pct: float = 10.0
     chip_min_low_zone_share_pct: float = 42.0
-    chip_ready_max_peak_distance_pct: float = 18.0
-    chip_launch_max_peak_distance_pct: float = 45.0
-    chip_launch_max_return_10d_pct: float = 45.0
-    chip_max_distribution_days_5: int = 2
-    chip_rebound_max_position_250: float = 0.85
-    chip_rebound_max_base_width_pct: float = 35.0
-    chip_rebound_max_70_width_pct: float = 36.0
-    chip_rebound_max_peak_position: float = 0.72
-    chip_rebound_min_peak_band_share_pct: float = 14.0
+    chip_ready_max_peak_distance_pct: float = 30.0
+    chip_launch_max_peak_distance_pct: float = 60.0
+    chip_launch_max_return_10d_pct: float = 55.0
+    chip_max_distribution_days_5: int = 3
+    chip_rebound_max_position_250: float = 0.98
+    chip_rebound_max_base_width_pct: float = 48.0
+    chip_rebound_max_70_width_pct: float = 50.0
+    chip_rebound_max_peak_position: float = 0.96
+    chip_rebound_min_peak_band_share_pct: float = 8.0
     chip_rebound_min_low_zone_share_pct: float = 30.0
-    chip_rebound_max_peak_distance_pct: float = 65.0
-    chip_rebound_max_return_20d_pct: float = 60.0
+    chip_rebound_max_peak_distance_pct: float = 90.0
+    chip_rebound_max_return_20d_pct: float = 75.0
     watchlist_ttl_sessions: int = 12
 
 
@@ -78,6 +82,14 @@ class AppConfig:
             raise ValueError("min_history_bars must be at least 120 for the configured indicators.")
         if self.data.max_workers < 1:
             raise ValueError("max_workers must be positive.")
+        if self.data.request_min_interval_seconds < 0:
+            raise ValueError("request_min_interval_seconds must not be negative.")
+        if self.data.baostock_max_retries < 1:
+            raise ValueError("baostock_max_retries must be positive.")
+        if self.data.incremental_refresh_days < 10:
+            raise ValueError("incremental_refresh_days must be at least 10.")
+        if not 0 < self.data.min_coverage_pct <= 100:
+            raise ValueError("min_coverage_pct must be in (0, 100].")
         if self.data.fund_flow_max_workers < 1 or self.data.fund_flow_limit < 20:
             raise ValueError("fund-flow workers must be positive and limit must be at least 20.")
         if self.data.fund_flow_request_pause_seconds < 0:

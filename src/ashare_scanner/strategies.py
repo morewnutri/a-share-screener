@@ -20,6 +20,16 @@ def _numeric(result: pd.DataFrame, column: str, default: float = np.nan) -> pd.S
     return result[column]
 
 
+def _fallback_column(
+    result: pd.DataFrame,
+    target: str,
+    source: str,
+    default: float = np.nan,
+) -> None:
+    if target not in result:
+        result[target] = result[source] if source in result else default
+
+
 def add_relative_strength(frame: pd.DataFrame) -> pd.DataFrame:
     result = frame.copy()
     benchmark20 = _numeric(result, "benchmark_return_20d_pct", 0.0).fillna(0.0)
@@ -44,145 +54,153 @@ def add_relative_strength(frame: pd.DataFrame) -> pd.DataFrame:
 def add_factor_scores(frame: pd.DataFrame) -> pd.DataFrame:
     result = frame.copy()
     benchmark_ok = _numeric(result, "benchmark_risk_ok", 1.0).fillna(1.0) >= 1
-    for column in (
-        "rebound_base_high",
-        "rebound_base_width_pct",
-        "rebound_base_return_pct",
-        "rebound_base_turnover_sum_pct",
-        "rebound_base_drawdown_120_pct",
-        "rebound_base_position_120",
-        "rebound_pre_base_decline_60_pct",
-        "distance_from_rebound_base_high_pct",
-        "rebound_price_action",
-        "ma5",
-        "ma10",
-        "ma20",
-        "rs20_percentile",
+    aliases = {
+        "adaptive_base_high": "base_high_20_pre3",
+        "adaptive_base_width_pct": "base_width_20_pre3_pct",
+        "adaptive_base_return_pct": "base_return_20_pre3_pct",
+        "adaptive_base_turnover_sum_pct": "base_turnover_sum_20_pre3_pct",
+        "adaptive_base_drawdown_120_pct": "base_drawdown_from_120_high_pct",
+        "adaptive_base_position_120": "base_position_120_pre3",
+        "adaptive_pre_base_decline_60_pct": "pre_base_decline_60_pct",
+        "adaptive_launch_price_action": "early_launch_price_action",
+        "adaptive_rebound_price_action": "rebound_price_action",
+    }
+    for target, source in aliases.items():
+        _fallback_column(result, target, source)
+    if "adaptive_ready_price_action" not in result:
+        launch_flag = pd.to_numeric(
+            result.get(
+                "early_launch_price_action",
+                pd.Series(0, index=result.index),
+            ),
+            errors="coerce",
+        ).fillna(0)
+        result["adaptive_ready_price_action"] = (launch_flag == 0).astype(int)
+    _fallback_column(result, "adaptive_base_window", "", 20.0)
+    _fallback_column(result, "adaptive_base_offset", "", 3.0)
+    if "adaptive_trend_votes" not in result:
+        launch_flag = pd.to_numeric(
+            result.get(
+                "early_launch_price_action",
+                pd.Series(0, index=result.index),
+            ),
+            errors="coerce",
+        ).fillna(0)
+        result["adaptive_trend_votes"] = launch_flag * 3
+    if "distance_from_adaptive_base_high_pct" not in result:
+        result["distance_from_adaptive_base_high_pct"] = (
+            result["close"] / result["adaptive_base_high"] - 1
+        ) * 100
+
+    numeric_columns = (
+        "adaptive_base_window",
+        "adaptive_base_offset",
+        "adaptive_base_width_pct",
+        "adaptive_base_return_pct",
+        "adaptive_base_turnover_sum_pct",
+        "adaptive_base_drawdown_120_pct",
+        "adaptive_base_position_120",
+        "adaptive_pre_base_decline_60_pct",
+        "adaptive_ready_price_action",
+        "adaptive_launch_price_action",
+        "adaptive_rebound_price_action",
+        "adaptive_trend_votes",
+        "distance_from_adaptive_base_high_pct",
+        "chip_peak_band_share_pct",
+        "chip_70_width_pct",
+        "chip_peak_position",
+        "chip_peak_dominance",
+        "chip_significant_peak_count",
+        "chip_low_zone_share_pct",
+        "chip_overhead_ratio_pct",
+        "chip_peak_distance_pct",
+        "distribution_day_count_5",
+        "breakout_failed_fast",
+        "breakout_stall_distribution",
+        "return_10d_pct",
         "return_20d_pct",
-    ):
+        "vol_ratio_20",
+        "up_down_volume_ratio_10",
+        "macd_rising",
+    )
+    for column in numeric_columns:
         _numeric(result, column)
 
-    deep_drawdown = result["base_drawdown_from_120_high_pct"] <= -20
-    prior_decline = result["pre_base_decline_60_pct"] <= -12
+    width = result["adaptive_base_width_pct"]
+    base_return = result["adaptive_base_return_pct"].abs()
     result["chip_score_base"] = (
-        deep_drawdown.astype(int) * 8
-        + prior_decline.astype(int) * 6
-        + (result["base_position_120_pre3"] <= 0.35).astype(int) * 7
-        + (result["base_width_20_pre3_pct"] <= 22).astype(int) * 8
-        + (result["base_return_20_pre3_pct"].abs() <= 8).astype(int) * 4
-        + (result["base_turnover_sum_20_pre3_pct"] >= 20).astype(int) * 2
+        (width <= 16).astype(int) * 12
+        + width.between(16, 28, inclusive="right").astype(int) * 8
+        + width.between(28, 42, inclusive="right").astype(int) * 4
+        + (base_return <= 6).astype(int) * 8
+        + base_return.between(6, 14, inclusive="right").astype(int) * 5
+        + base_return.between(14, 22, inclusive="right").astype(int) * 2
+        + (result["adaptive_base_window"] >= 40).astype(int) * 4
+        + result["adaptive_base_window"].between(20, 39, inclusive="both").astype(int) * 2
+        + (result["adaptive_base_turnover_sum_pct"] >= 15).astype(int) * 3
     ).clip(upper=35)
 
-    tight70 = result["chip_70_width_pct"] <= 18
-    acceptable70 = result["chip_70_width_pct"].between(18, 26, inclusive="right")
-    very_low_peak = result["chip_peak_position"] <= 0.35
-    low_peak = result["chip_peak_position"].between(0.35, 0.55, inclusive="right")
-    strong_peak = result["chip_peak_band_share_pct"] >= 28
-    visible_peak = result["chip_peak_band_share_pct"].between(18, 28, inclusive="left")
-    dense_low_zone = result["chip_low_zone_share_pct"] >= 55
-    acceptable_low_zone = result["chip_low_zone_share_pct"].between(
-        42, 55, inclusive="left"
-    )
+    peak_share = result["chip_peak_band_share_pct"]
+    chip_width = result["chip_70_width_pct"]
     result["chip_score_profile"] = (
-        tight70.astype(int) * 10
-        + acceptable70.astype(int) * 6
-        + very_low_peak.astype(int) * 8
-        + low_peak.astype(int) * 5
-        + strong_peak.astype(int) * 8
-        + visible_peak.astype(int) * 5
-        + dense_low_zone.astype(int) * 5
-        + acceptable_low_zone.astype(int) * 3
-        + (result["chip_peak_dominance"] >= 1.25).astype(int) * 2
-        + (result["chip_significant_peak_count"] <= 2).astype(int) * 2
-        + (result["chip_overhead_ratio_pct"] <= 60).astype(int) * 2
-    ).clip(upper=40)
+        (peak_share >= 25).astype(int) * 12
+        + peak_share.between(18, 25, inclusive="left").astype(int) * 9
+        + peak_share.between(12, 18, inclusive="left").astype(int) * 6
+        + peak_share.between(10, 12, inclusive="left").astype(int) * 4
+        + (chip_width <= 18).astype(int) * 10
+        + chip_width.between(18, 30, inclusive="right").astype(int) * 7
+        + chip_width.between(30, 45, inclusive="right").astype(int) * 4
+        + (result["chip_peak_dominance"] >= 1.50).astype(int) * 5
+        + result["chip_peak_dominance"].between(1.15, 1.50, inclusive="left").astype(int) * 3
+        + (result["chip_significant_peak_count"] <= 2).astype(int) * 4
+        + result["chip_significant_peak_count"].between(3, 4, inclusive="both").astype(int) * 2
+        + (result["chip_low_zone_share_pct"] >= 35).astype(int) * 4
+        + result["chip_low_zone_share_pct"].between(20, 35, inclusive="left").astype(int) * 2
+    ).clip(upper=35)
+
+    drawdown = result["adaptive_base_drawdown_120_pct"]
+    position = result["adaptive_base_position_120"]
+    prior_decline = result["adaptive_pre_base_decline_60_pct"]
+    result["chip_score_context"] = (
+        (drawdown <= -20).astype(int) * 6
+        + drawdown.between(-20, -8, inclusive="left").astype(int) * 4
+        + (position <= 0.40).astype(int) * 5
+        + position.between(0.40, 0.75, inclusive="right").astype(int) * 3
+        + position.between(0.75, 0.88, inclusive="right").astype(int)
+        + (prior_decline <= -12).astype(int) * 4
+        + prior_decline.between(-12, -5, inclusive="left").astype(int) * 2
+    ).clip(upper=15)
 
     result["chip_score_launch"] = (
-        (result["early_launch_price_action"] == 1).astype(int) * 8
-        + (result["close"] >= result["chip_peak_price"]).astype(int) * 2
-        + (result["vol_ratio_20"] >= 1.05).astype(int) * 3
-        + (result["macd_rising"] == 1).astype(int) * 2
+        result["adaptive_trend_votes"].clip(lower=0, upper=5) * 2
+        + (result["vol_ratio_20"] >= 1.05).astype(int) * 2
+        + (result["up_down_volume_ratio_10"] >= 1.15).astype(int) * 2
+        + (result["macd_rising"] == 1).astype(int)
     ).clip(upper=15)
     result["chip_score_risk"] = (
-        (result["distribution_day_count_5"] == 0).astype(int) * 3
-        + (result["breakout_failed_fast"] == 0).astype(int) * 2
-        + (result["return_10d_pct"] <= 35).astype(int) * 2
-        + (result["chip_overhead_ratio_pct"] <= 60).astype(int) * 2
+        (result["distribution_day_count_5"] <= 2).astype(int) * 2
+        + (result["breakout_failed_fast"] == 0).astype(int)
+        + (result["breakout_stall_distribution"] == 0).astype(int)
         + benchmark_ok.astype(int)
-    ).clip(upper=10)
+    ).clip(upper=5)
 
-    rebound_tight = result["rebound_base_width_pct"] <= 24
-    rebound_acceptable = result["rebound_base_width_pct"].between(
-        24, 35, inclusive="right"
-    )
-    result["chip_score_rebound_base"] = (
-        (result["rebound_base_drawdown_120_pct"] <= -18).astype(int) * 7
-        + (result["rebound_pre_base_decline_60_pct"] <= -10).astype(int) * 5
-        + (result["rebound_base_position_120"] <= 0.50).astype(int) * 6
-        + rebound_tight.astype(int) * 8
-        + rebound_acceptable.astype(int) * 5
-        + (result["rebound_base_return_pct"].abs() <= 10).astype(int) * 5
-        + (result["rebound_base_turnover_sum_pct"] >= 20).astype(int) * 2
-    ).clip(upper=35)
-
-    rebound_tight70 = result["chip_70_width_pct"] <= 24
-    rebound_acceptable70 = result["chip_70_width_pct"].between(
-        24, 36, inclusive="right"
-    )
-    rebound_low_peak = result["chip_peak_position"] <= 0.50
-    rebound_acceptable_peak = result["chip_peak_position"].between(
-        0.50, 0.72, inclusive="right"
-    )
-    rebound_strong_peak = result["chip_peak_band_share_pct"] >= 24
-    rebound_visible_peak = result["chip_peak_band_share_pct"].between(
-        14, 24, inclusive="left"
-    )
-    rebound_dense_low = result["chip_low_zone_share_pct"] >= 45
-    rebound_acceptable_low = result["chip_low_zone_share_pct"].between(
-        30, 45, inclusive="left"
-    )
-    result["chip_score_rebound_profile"] = (
-        rebound_tight70.astype(int) * 10
-        + rebound_acceptable70.astype(int) * 6
-        + rebound_low_peak.astype(int) * 8
-        + rebound_acceptable_peak.astype(int) * 5
-        + rebound_strong_peak.astype(int) * 8
-        + rebound_visible_peak.astype(int) * 5
-        + rebound_dense_low.astype(int) * 5
-        + rebound_acceptable_low.astype(int) * 3
-        + (result["chip_peak_dominance"] >= 1.20).astype(int) * 2
-        + (result["chip_significant_peak_count"] <= 3).astype(int) * 2
-        + (result["chip_overhead_ratio_pct"] <= 65).astype(int) * 2
-    ).clip(upper=40)
-    result["chip_score_rebound_trend"] = (
-        (result["rebound_price_action"] == 1).astype(int) * 10
-        + (result["close"] >= result["ma10"]).astype(int) * 3
-        + (result["vol_ratio_20"] >= 0.90).astype(int) * 3
-        + (result["macd_rising"] == 1).astype(int) * 2
-        + (result["rs20_percentile"] >= 0.50).astype(int) * 2
-    ).clip(upper=20)
-
-    result["chip_structure_score"] = (
-        result[["chip_score_base", "chip_score_profile", "chip_score_risk"]]
-        .sum(axis=1)
-        .clip(upper=85)
-    )
-    result["chip_base_ready_score"] = result["chip_structure_score"]
+    structure = result[
+        ["chip_score_base", "chip_score_profile", "chip_score_context", "chip_score_risk"]
+    ].sum(axis=1)
+    result["chip_structure_score"] = structure.clip(upper=90)
+    result["chip_base_ready_score"] = (
+        structure + (result["adaptive_ready_price_action"] == 1).astype(int) * 10
+    ).clip(upper=100)
     result["chip_base_launch_score"] = (
-        result["chip_structure_score"] + result["chip_score_launch"]
+        structure
+        + result["chip_score_launch"]
+        + (result["adaptive_launch_price_action"] == 1).astype(int) * 5
     ).clip(upper=100)
     result["chip_base_rebound_score"] = (
-        result[
-            [
-                "chip_score_rebound_base",
-                "chip_score_rebound_profile",
-                "chip_score_rebound_trend",
-                "chip_score_risk",
-            ]
-        ]
-        .sum(axis=1)
-        .clip(upper=100)
-    )
+        structure
+        + result["chip_score_launch"]
+        + (result["adaptive_rebound_price_action"] == 1).astype(int) * 5
+    ).clip(upper=100)
     result["score_total"] = result[
         ["chip_base_ready_score", "chip_base_launch_score", "chip_base_rebound_score"]
     ].max(axis=1)
@@ -210,17 +228,22 @@ def signal_funnels(
 
     bottom_location = (
         (frame["position_250"] <= strategy_config.chip_max_position_250)
-        & (frame["base_position_120_pre3"] <= 0.55)
         & (
-            (frame["base_drawdown_from_120_high_pct"] <= -18)
-            | (frame["pre_base_decline_60_pct"] <= -12)
+            (frame["adaptive_base_position_120"] <= 0.88)
+            | (frame["adaptive_base_drawdown_120_pct"] <= -8)
+            | (frame["adaptive_pre_base_decline_60_pct"] <= -5)
         )
     )
     platform = (
-        (frame["base_width_20_pre3_pct"] <= strategy_config.chip_max_base_width_pct)
+        frame["adaptive_base_high"].notna()
+        & (frame["adaptive_base_width_pct"] <= strategy_config.chip_max_base_width_pct)
         & (
-            frame["base_return_20_pre3_pct"].abs()
+            frame["adaptive_base_return_pct"].abs()
             <= strategy_config.chip_max_base_abs_return_pct
+        )
+        & (
+            (frame["adaptive_base_window"] >= 30)
+            | (frame["adaptive_base_width_pct"] <= 18)
         )
     )
     concentrated_low_peak = (
@@ -230,28 +253,27 @@ def signal_funnels(
             frame["chip_peak_band_share_pct"]
             >= strategy_config.chip_min_peak_band_share_pct
         )
-        & (
-            frame["chip_low_zone_share_pct"]
-            >= strategy_config.chip_min_low_zone_share_pct
-        )
     )
     risk_ok = (
-        (frame["distribution_day_count_5"] <= strategy_config.chip_max_distribution_days_5)
-        & (frame["breakout_failed_fast"] == 0)
-        & (frame["breakout_stall_distribution"] == 0)
+        (frame["distribution_day_count_5"] <= strategy_config.chip_max_distribution_days_5 + 1)
+        & ~(
+            (frame["breakout_failed_fast"] == 1)
+            & (frame["distance_from_adaptive_base_high_pct"] < -8)
+        )
     )
     ready_position = (
-        (frame["early_launch_price_action"] == 0)
+        (frame["adaptive_ready_price_action"] == 1)
+        & (frame["adaptive_launch_price_action"] == 0)
         & frame["chip_peak_distance_pct"].between(
-            -6,
+            -12,
             strategy_config.chip_ready_max_peak_distance_pct,
             inclusive="both",
         )
     )
     launch = (
-        (frame["early_launch_price_action"] == 1)
+        (frame["adaptive_launch_price_action"] == 1)
         & frame["chip_peak_distance_pct"].between(
-            -3,
+            -8,
             strategy_config.chip_launch_max_peak_distance_pct,
             inclusive="both",
         )
@@ -259,19 +281,17 @@ def signal_funnels(
     )
     rebound_location = (
         (frame["position_250"] <= strategy_config.chip_rebound_max_position_250)
-        & (frame["rebound_base_position_120"] <= 0.72)
         & (
-            (frame["rebound_base_drawdown_120_pct"] <= -10)
-            | (frame["rebound_pre_base_decline_60_pct"] <= -8)
+            (frame["adaptive_base_position_120"] <= 0.92)
+            | (frame["adaptive_base_drawdown_120_pct"] <= -5)
+            | (frame["adaptive_pre_base_decline_60_pct"] <= -3)
         )
     )
     rebound_platform = (
-        frame["rebound_base_high"].notna()
-        & (
-            frame["rebound_base_width_pct"]
-            <= strategy_config.chip_rebound_max_base_width_pct
-        )
-        & (frame["rebound_base_return_pct"].abs() <= 20)
+        frame["adaptive_base_high"].notna()
+        & (frame["adaptive_base_offset"] >= 8)
+        & (frame["adaptive_base_width_pct"] <= strategy_config.chip_rebound_max_base_width_pct)
+        & (frame["adaptive_base_return_pct"].abs() <= 25)
     )
     rebound_chip_peak = (
         (frame["chip_70_width_pct"] <= strategy_config.chip_rebound_max_70_width_pct)
@@ -280,15 +300,11 @@ def signal_funnels(
             frame["chip_peak_band_share_pct"]
             >= strategy_config.chip_rebound_min_peak_band_share_pct
         )
-        & (
-            frame["chip_low_zone_share_pct"]
-            >= strategy_config.chip_rebound_min_low_zone_share_pct
-        )
     )
     rebound_move = (
-        (frame["rebound_price_action"] == 1)
+        (frame["adaptive_rebound_price_action"] == 1)
         & frame["chip_peak_distance_pct"].between(
-            -3,
+            -10,
             strategy_config.chip_rebound_max_peak_distance_pct,
             inclusive="both",
         )
@@ -299,8 +315,10 @@ def signal_funnels(
             frame["distribution_day_count_5"]
             <= strategy_config.chip_max_distribution_days_5 + 1
         )
-        & (frame["breakout_failed_fast"] == 0)
-        & (frame["breakout_stall_distribution"] == 0)
+        & ~(
+            (frame["breakout_failed_fast"] == 1)
+            & (frame["distance_from_adaptive_base_high_pct"] < -10)
+        )
     )
     return {
         "chip_base_ready": common

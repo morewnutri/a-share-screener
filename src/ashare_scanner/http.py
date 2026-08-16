@@ -20,10 +20,28 @@ USER_AGENTS = (
 
 
 class HttpClient:
-    def __init__(self, timeout: float, max_retries: int) -> None:
+    def __init__(
+        self,
+        timeout: float,
+        max_retries: int,
+        min_interval_seconds: float = 0.0,
+    ) -> None:
         self.timeout = timeout
         self.max_retries = max_retries
+        self.min_interval_seconds = max(0.0, min_interval_seconds)
         self._local = threading.local()
+        self._rate_lock = threading.Lock()
+        self._next_request_at = 0.0
+
+    def _wait_for_rate_limit(self) -> None:
+        if self.min_interval_seconds <= 0:
+            return
+        with self._rate_lock:
+            now = time.monotonic()
+            wait_seconds = max(0.0, self._next_request_at - now)
+            self._next_request_at = max(now, self._next_request_at) + self.min_interval_seconds
+        if wait_seconds:
+            time.sleep(wait_seconds)
 
     def _session(self) -> requests.Session:
         if not hasattr(self._local, "session"):
@@ -53,6 +71,7 @@ class HttpClient:
         last_error: Exception | None = None
         for attempt in range(self.max_retries):
             try:
+                self._wait_for_rate_limit()
                 response = self._session().get(
                     url,
                     params=params,

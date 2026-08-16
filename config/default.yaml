@@ -4,9 +4,13 @@ data:
   start_date: "2022-01-01"
   fqt: 1
   min_history_bars: 150
-  max_workers: 12
+  max_workers: 4
   request_timeout: 12
-  max_retries: 3
+  max_retries: 2
+  request_min_interval_seconds: 0.12
+  baostock_max_retries: 2
+  incremental_refresh_days: 30
+  min_coverage_pct: 90
   close_buffer_minutes: 10
   universe_cache_hours: 24
   min_universe_size: 2000
@@ -21,28 +25,28 @@ data:
 strategy:
   top_n: 100
   min_amount_ma20: 30000000
-  chip_base_ready_score_min: 58
-  chip_base_launch_score_min: 68
-  chip_base_rebound_score_min: 62
-  chip_max_position_250: 0.70
-  chip_max_base_width_pct: 30
-  chip_max_base_abs_return_pct: 15
-  chip_max_70_width_pct: 26
-  chip_max_peak_position: 0.55
-  chip_min_peak_band_share_pct: 18
+  chip_base_ready_score_min: 48
+  chip_base_launch_score_min: 55
+  chip_base_rebound_score_min: 52
+  chip_max_position_250: 0.92
+  chip_max_base_width_pct: 42
+  chip_max_base_abs_return_pct: 22
+  chip_max_70_width_pct: 45
+  chip_max_peak_position: 0.92
+  chip_min_peak_band_share_pct: 10
   chip_min_low_zone_share_pct: 42
-  chip_ready_max_peak_distance_pct: 18
-  chip_launch_max_peak_distance_pct: 45
-  chip_launch_max_return_10d_pct: 45
-  chip_max_distribution_days_5: 2
-  chip_rebound_max_position_250: 0.85
-  chip_rebound_max_base_width_pct: 35
-  chip_rebound_max_70_width_pct: 36
-  chip_rebound_max_peak_position: 0.72
-  chip_rebound_min_peak_band_share_pct: 14
+  chip_ready_max_peak_distance_pct: 30
+  chip_launch_max_peak_distance_pct: 60
+  chip_launch_max_return_10d_pct: 55
+  chip_max_distribution_days_5: 3
+  chip_rebound_max_position_250: 0.98
+  chip_rebound_max_base_width_pct: 48
+  chip_rebound_max_70_width_pct: 50
+  chip_rebound_max_peak_position: 0.96
+  chip_rebound_min_peak_band_share_pct: 8
   chip_rebound_min_low_zone_share_pct: 30
-  chip_rebound_max_peak_distance_pct: 65
-  chip_rebound_max_return_20d_pct: 60
+  chip_rebound_max_peak_distance_pct: 90
+  chip_rebound_max_return_20d_pct: 75
   watchlist_ttl_sessions: 12
 
 backtest:

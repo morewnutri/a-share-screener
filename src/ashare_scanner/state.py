@@ -55,6 +55,13 @@ def _read_csv(path: Path) -> pd.DataFrame:
         return pd.DataFrame()
 
 
+def read_active_watchlist(data_dir: Path) -> pd.DataFrame:
+    watchlist = _read_csv(data_dir / "state" / "watchlist.csv")
+    if watchlist.empty:
+        return pd.DataFrame(columns=WATCHLIST_COLUMNS)
+    return watchlist[watchlist["state"].isin(ACTIVE_STATES)].reset_index(drop=True)
+
+
 def update_watchlist(
     data_dir: Path,
     signals: dict[str, pd.DataFrame],

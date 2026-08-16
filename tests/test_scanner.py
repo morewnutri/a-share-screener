@@ -72,3 +72,66 @@ def test_daily_scanner_runs_end_to_end_from_fresh_cache(tmp_path, trending_histo
     assert "[低位横盘+筹码峰（待启动）]" in output
     assert "[筛选漏斗]" in output
     assert "筹码口径: modeled_cyq" in output
+
+
+def test_low_coverage_invalidates_published_candidates_and_preserves_state(
+    tmp_path,
+    trending_history,
+    capsys,
+):
+    expected = pd.Timestamp("2026-07-15").date()
+    history = trending_history.copy()
+    history["date"] = pd.bdate_range(end=expected.isoformat(), periods=len(history))
+    data_config = DataConfig(
+        start_date="2025-01-01",
+        min_history_bars=150,
+        max_workers=2,
+        min_universe_size=3,
+        min_coverage_pct=90,
+    )
+    config = AppConfig(
+        data_dir=str(tmp_path),
+        data=data_config,
+        strategy=StrategyConfig(min_amount_ma20=1),
+    )
+    history_cache = HistoryCache(tmp_path / "cache", data_config.start_date, data_config.fqt)
+    history_cache.write("000001", history, "eastmoney:test", "stock", expected)
+    benchmark = history.copy()
+    benchmark["code"] = "1_000300"
+    history_cache.write(
+        "benchmark_1.000300",
+        benchmark,
+        "eastmoney:test",
+        "benchmark",
+        expected,
+    )
+    universe = pd.DataFrame(
+        [
+            {"code": "000001", "name": "sample-a"},
+            {"code": "000002", "name": "sample-b"},
+            {"code": "000003", "name": "sample-c"},
+        ]
+    )
+    UniverseCache(tmp_path / "cache").write(universe, "test", expected)
+
+    class FailedHistorySource:
+        def fetch_stock_history(self, *args, **kwargs):
+            raise RuntimeError("provider unavailable")
+
+    scanner = DailyScanner(config)
+    scanner.source = FailedHistorySource()
+    run_dir = scanner.run(
+        datetime(2026, 7, 15, 15, 20, tzinfo=ZoneInfo("Asia/Shanghai"))
+    )
+
+    report = json.loads((run_dir / "coverage_report.json").read_text(encoding="utf-8"))
+    assert report["screening"]["valid"] is False
+    assert report["fetch"]["coverage_pct"] < 90
+    assert (run_dir / "provisional_chip_base_ready.csv").exists()
+    assert pd.read_csv(run_dir / "chip_base_ready_all.csv").empty
+    assert len(pd.read_csv(run_dir / "reference_examples_audit.csv")) > 10
+    assert not (tmp_path / "state" / "watchlist.csv").exists()
+
+    print_run_summary(run_dir, top_n=5)
+    output = capsys.readouterr().out
+    assert "[本次扫描无效]" in output

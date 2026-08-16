@@ -61,14 +61,17 @@ def test_flat_stock_without_prior_decline_is_rejected():
     row = _row("000001", False)
     row["base_drawdown_from_120_high_pct"] = -5.0
     row["pre_base_decline_60_pct"] = 1.0
+    row["base_position_120_pre3"] = 0.95
+    row["position_250"] = 0.95
     _, signals = apply_strategies(pd.DataFrame([row]), DataConfig(), StrategyConfig())
     assert signals["chip_base_ready"].empty
 
 
 def test_diffuse_or_high_chip_profile_is_rejected():
     row = _row("000001", True)
-    row["chip_70_width_pct"] = 40.0
-    row["chip_peak_position"] = 0.75
+    row["chip_70_width_pct"] = 58.0
+    row["chip_peak_position"] = 0.96
+    row["chip_peak_band_share_pct"] = 7.0
     _, signals = apply_strategies(pd.DataFrame([row]), DataConfig(), StrategyConfig())
     assert signals["chip_base_launch"].empty
 
@@ -101,6 +104,20 @@ def test_recent_platform_rebound_has_its_own_signal():
             "rebound_pre_base_decline_60_pct": -16.0,
             "distance_from_rebound_base_high_pct": 14.0,
             "rebound_price_action": 1,
+            "adaptive_base_high": 15.8,
+            "adaptive_base_width_pct": 18.0,
+            "adaptive_base_return_pct": 2.0,
+            "adaptive_base_turnover_sum_pct": 45.0,
+            "adaptive_base_drawdown_120_pct": -25.0,
+            "adaptive_base_position_120": 0.42,
+            "adaptive_pre_base_decline_60_pct": -16.0,
+            "adaptive_base_window": 30,
+            "adaptive_base_offset": 10,
+            "distance_from_adaptive_base_high_pct": 14.0,
+            "adaptive_ready_price_action": 0,
+            "adaptive_launch_price_action": 0,
+            "adaptive_rebound_price_action": 1,
+            "adaptive_trend_votes": 4,
             "return_20d_pct": 24.0,
             "ma5": 17.8,
             "ma10": 17.0,
@@ -112,6 +129,16 @@ def test_recent_platform_rebound_has_its_own_signal():
     assert signals["chip_base_ready"].empty
     assert signals["chip_base_launch"].empty
     assert signals["chip_base_rebound"]["code"].tolist() == ["000001"]
+
+
+def test_visible_peak_with_moderate_width_is_not_overfiltered():
+    row = _row("000001", True)
+    row["chip_70_width_pct"] = 39.0
+    row["chip_peak_position"] = 0.76
+    row["chip_peak_band_share_pct"] = 13.0
+    row["chip_low_zone_share_pct"] = 28.0
+    _, signals = apply_strategies(pd.DataFrame([row]), DataConfig(), StrategyConfig())
+    assert signals["chip_base_launch"]["code"].tolist() == ["000001"]
 
 
 def test_scores_are_capped_and_funnel_matches_outputs():
