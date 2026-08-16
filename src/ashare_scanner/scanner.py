@@ -22,6 +22,7 @@ from .fund_flow import (
     FUND_FLOW_FEATURE_COLUMNS,
     merge_fund_flow_features,
     rank_signal_by_fund_flow,
+    select_fund_flow_candidates,
     summarize_fund_flow,
 )
 from .http import HttpClient
@@ -52,6 +53,12 @@ class DailyScanner:
         web_source = EastmoneyDataSource(self.http, config.data.fqt)
         baostock_source = BaoStockDataSource(max_retries=config.data.baostock_max_retries)
         self.source = HybridDataSource(web_source, baostock_source)
+        fund_flow_http = HttpClient(
+            config.data.fund_flow_request_timeout,
+            1,
+            config.data.request_min_interval_seconds,
+        )
+        self.fund_flow_source = EastmoneyDataSource(fund_flow_http, config.data.fqt)
         self.history_cache = HistoryCache(
             self.cache_dir,
             config.data.start_date,
@@ -84,6 +91,11 @@ class DailyScanner:
         ).astype(int)
 
         statuses, snapshots = self._scan_universe(universe, expected)
+        LOGGER.info(
+            "History stage complete: %d/%d stocks produced indicators; computing morphology scores.",
+            len(snapshots),
+            len(universe),
+        )
 
         status_frame = pd.DataFrame(statuses).sort_values("code").reset_index(drop=True)
         atomic_write_csv(status_frame, run_dir / "fetch_status.csv")
@@ -128,6 +140,7 @@ class DailyScanner:
             self.config.data,
             self.config.strategy,
         )
+        self._write_shape_checkpoints(signals, run_dir)
         if coverage_valid:
             scored, signals, fund_flow_status, fund_flow_metadata = self._enrich_fund_flow(
                 scored,
@@ -279,6 +292,29 @@ class DailyScanner:
                         ok_count = sum(row["status"] == "ok" for row in statuses)
                         LOGGER.info("Progress %d/%d, ok=%d", completed_total, len(records), ok_count)
         return statuses, snapshots
+
+    @staticmethod
+    def _write_shape_checkpoints(
+        signals: dict[str, pd.DataFrame],
+        run_dir: Path,
+    ) -> None:
+        for signal_name in SIGNAL_ORDER:
+            frame = signals[signal_name].copy()
+            if "date" in frame:
+                frame["date"] = pd.to_datetime(frame["date"], errors="coerce").dt.strftime(
+                    "%Y-%m-%d"
+                )
+            atomic_write_csv(frame, run_dir / f"shape_only_{signal_name}_all.csv")
+            preview = ", ".join(
+                f"{str(row.code).zfill(6)} {row.name}"
+                for row in frame.head(10).itertuples(index=False)
+            )
+            LOGGER.info(
+                "Morphology checkpoint %s: %d candidates%s",
+                signal_name,
+                len(frame),
+                f"; top preview: {preview}" if preview else "",
+            )
 
     def _get_universe(self, expected: date) -> tuple[pd.DataFrame, str, str]:
         cached = self.universe_cache.read(expected, self.config.data.universe_cache_hours)
@@ -512,74 +548,115 @@ class DailyScanner:
         expected: date,
     ) -> tuple[pd.DataFrame, dict[str, pd.DataFrame], pd.DataFrame, dict[str, Any]]:
         status_columns = ("code", "name", "status", "rows", "last_date", "source", "error")
-        candidate_rows = [
-            frame[["code", "name"]]
-            for frame in signals.values()
-            if not frame.empty
-        ]
-        candidates = (
-            pd.concat(candidate_rows, ignore_index=True).drop_duplicates("code")
-            if candidate_rows
-            else pd.DataFrame(columns=["code", "name"])
+        model_scores = {
+            "chip_base_ready": "chip_base_ready_score",
+            "chip_base_launch": "chip_base_launch_score",
+            "chip_base_rebound": "chip_base_rebound_score",
+        }
+        candidates, total_candidates = select_fund_flow_candidates(
+            signals,
+            model_scores,
+            self.config.data.fund_flow_max_candidates,
         )
         feature_rows: list[dict[str, Any]] = []
         statuses: list[dict[str, Any]] = []
+        attempted = 0
+        failure_streak = 0
+        stopped_reason = ""
 
         if self.config.data.fund_flow_enabled and not candidates.empty:
             workers = min(self.config.data.fund_flow_max_workers, len(candidates))
-            with ThreadPoolExecutor(max_workers=workers) as executor:
-                futures = {
-                    executor.submit(
-                        self._get_stock_fund_flow,
-                        row.code,
-                        expected,
-                    ): (str(row.code).zfill(6), row.name)
-                    for row in candidates.itertuples(index=False)
-                }
-                for future in as_completed(futures):
-                    code, name = futures[future]
-                    try:
-                        history, source = future.result()
-                        summary = summarize_fund_flow(history, expected)
-                        if not summary:
-                            raise RuntimeError("fund-flow history has no usable rows")
-                        feature_rows.append({"code": code, **summary})
-                        statuses.append(
-                            {
-                                "code": code,
-                                "name": name,
-                                "status": "ok"
-                                if summary["fund_flow_is_current"]
-                                else "stale",
-                                "rows": int(len(history)),
-                                "last_date": summary["fund_flow_latest_date"],
-                                "source": source,
-                                "error": "",
-                            }
-                        )
-                    except Exception as exc:
-                        statuses.append(
-                            {
-                                "code": code,
-                                "name": name,
-                                "status": "failed",
-                                "rows": 0,
-                                "last_date": "",
-                                "source": "",
-                                "error": f"{type(exc).__name__}: {exc}",
-                            }
-                        )
+            LOGGER.info(
+                "Fund-flow stage: selected %d/%d morphology candidates (cap=%d, workers=%d).",
+                len(candidates),
+                total_candidates,
+                self.config.data.fund_flow_max_candidates,
+                workers,
+            )
+            stage_started = time.monotonic()
+            rows = list(candidates.itertuples(index=False))
+            batch_size = max(workers, self.config.data.fund_flow_progress_every)
+            for offset in range(0, len(rows), batch_size):
+                elapsed_minutes = (time.monotonic() - stage_started) / 60
+                if elapsed_minutes >= self.config.data.fund_flow_stage_timeout_minutes:
+                    stopped_reason = "stage_timeout"
+                    break
+                batch = rows[offset : offset + batch_size]
+                with ThreadPoolExecutor(max_workers=workers) as executor:
+                    futures = {
+                        executor.submit(
+                            self._get_stock_fund_flow,
+                            row.code,
+                            expected,
+                        ): (str(row.code).zfill(6), row.name)
+                        for row in batch
+                    }
+                    for future in as_completed(futures):
+                        code, name = futures[future]
+                        attempted += 1
+                        try:
+                            history, source = future.result()
+                            summary = summarize_fund_flow(history, expected)
+                            if not summary:
+                                raise RuntimeError("fund-flow history has no usable rows")
+                            feature_rows.append({"code": code, **summary})
+                            statuses.append(
+                                {
+                                    "code": code,
+                                    "name": name,
+                                    "status": "ok"
+                                    if summary["fund_flow_is_current"]
+                                    else "stale",
+                                    "rows": int(len(history)),
+                                    "last_date": summary["fund_flow_latest_date"],
+                                    "source": source,
+                                    "error": "",
+                                }
+                            )
+                            failure_streak = 0
+                        except Exception as exc:
+                            failure_streak += 1
+                            statuses.append(
+                                {
+                                    "code": code,
+                                    "name": name,
+                                    "status": "failed",
+                                    "rows": 0,
+                                    "last_date": "",
+                                    "source": "",
+                                    "error": f"{type(exc).__name__}: {exc}",
+                                }
+                            )
+                elapsed_seconds = time.monotonic() - stage_started
+                remaining = len(candidates) - attempted
+                eta_seconds = elapsed_seconds / attempted * remaining if attempted else 0
+                LOGGER.info(
+                    "Fund-flow progress %d/%d, ok=%d, failed=%d, elapsed=%.1f min, ETA=%.1f min",
+                    attempted,
+                    len(candidates),
+                    len(feature_rows),
+                    sum(row["status"] == "failed" for row in statuses),
+                    elapsed_seconds / 60,
+                    eta_seconds / 60,
+                )
+                if failure_streak >= self.config.data.fund_flow_failure_streak_limit:
+                    stopped_reason = "consecutive_failures"
+                    break
+            if stopped_reason:
+                LOGGER.warning(
+                    "Fund-flow stage stopped early (%s) after %d/%d requests; morphology candidates remain published.",
+                    stopped_reason,
+                    attempted,
+                    len(candidates),
+                )
+        elif not self.config.data.fund_flow_enabled:
+            stopped_reason = "disabled"
 
         features = pd.DataFrame(feature_rows, columns=("code", *FUND_FLOW_FEATURE_COLUMNS))
         status_frame = pd.DataFrame(statuses, columns=status_columns)
         if not status_frame.empty:
             status_frame = status_frame.sort_values("code").reset_index(drop=True)
         scored = merge_fund_flow_features(scored, features)
-        model_scores = {
-            "chip_base_ready": "chip_base_ready_score",
-            "chip_base_launch": "chip_base_launch_score",
-            "chip_base_rebound": "chip_base_rebound_score",
-        }
         ranked: dict[str, pd.DataFrame] = {}
         for signal, frame in signals.items():
             enriched = merge_fund_flow_features(frame, features)
@@ -588,7 +665,14 @@ class DailyScanner:
         status_counts = status_frame["status"].value_counts().to_dict() if not status_frame.empty else {}
         metadata = {
             "enabled": self.config.data.fund_flow_enabled,
-            "requested_candidate_count": int(len(candidates)),
+            "total_candidate_count": int(total_candidates),
+            "requested_candidate_count": int(len(candidates))
+            if self.config.data.fund_flow_enabled
+            else 0,
+            "attempted_candidate_count": int(attempted),
+            "skipped_by_cap_count": int(max(0, total_candidates - len(candidates))),
+            "unattempted_selected_count": int(max(0, len(candidates) - attempted)),
+            "stopped_reason": stopped_reason,
             "status_counts": {str(key): int(value) for key, value in status_counts.items()},
             "current_count": int(
                 pd.to_numeric(features.get("fund_flow_is_current"), errors="coerce").fillna(0).sum()
@@ -629,9 +713,10 @@ class DailyScanner:
             return cached, "fund_flow_cache"
 
         try:
-            history, source = self.source.fetch_stock_fund_flow(
+            history, source = self.fund_flow_source.fetch_stock_fund_flow(
                 code,
                 self.config.data.fund_flow_limit,
+                self.config.data.fund_flow_max_hosts,
             )
             atomic_write_csv(history, cache_path)
             return history, source

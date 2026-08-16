@@ -101,7 +101,7 @@ CLI 和 notebook 都会直接打印筛选结果。空 CSV 只有表头表示当�
 2. 打开 `notebooks/colab_daily_scan.ipynb`。
 3. 修改 `REPO_URL`，挂载 Google Drive，运行全部单元格。
 4. 默认使用 `config/default.yaml`；需要判断是否过严时改为 `config/high_recall.yaml` 再跑一次。
-5. 安装后先运行 `python -m ashare_scanner --version`，确认打印版本至少为 `0.3.0`，避免 GitHub `main` 仍是旧代码。
+5. 安装后先运行 `python -m ashare_scanner --version`，确认打印版本至少为 `0.3.1`，避免 GitHub `main` 仍是旧代码。
 
 首次运行会下载主板股票历史，后续优先复用 Drive 缓存。建议将以下数据目录保存在 Drive：
 
@@ -147,6 +147,7 @@ python -m ashare_scanner --config config/default.yaml --data-dir data backtest \
 - `near_miss_top100.csv`：最接近入选的股票及首个未通过步骤。
 - `fetch_status.csv`：每只股票的抓取、历史长度和最新日期状态。
 - `fund_flow_status.csv`：最终候选的资金流抓取日期、来源和失败原因。
+- `shape_only_*_all.csv`：形态评分完成后立即写出的检查点；资金流接口超时或失败也不会丢失候选。
 - `coverage_report.json`：数据覆盖率、真实候选数、数据口径和自动诊断。
 - `watchlist_active.csv`、`state_transitions.csv`：跨日观察状态。
 - `reference_examples_audit.csv`：CLI 生成的完整参考样本诊断，抓取失败的样本也会保留，不参与选股。
@@ -175,7 +176,15 @@ python -m ashare_scanner --config config/default.yaml --data-dir data backtest \
 
 ## 主力资金排序
 
-程序使用东方财富个股资金流历史接口，只对最终候选请求近 100 个交易日数据，因此不会给全市场额外增加数千次请求。资金请求默认单线程并间隔 0.4 秒，成功数据保存在 `cache/fund_flow/`；当日缓存直接复用，刷新失败时允许使用明确标记为滞后的旧缓存。公开字段和解析口径可参考 [AKShare 的个股资金流实现](https://github.com/akfamily/akshare/blob/main/akshare/stock/stock_fund_em.py)。
+程序使用东方财富个股资金流历史接口，只对形态排名靠前且不超过 `fund_flow_max_candidates`（默认 120）的候选请求近 100 个交易日数据。三个形态列表采用轮询方式公平选取，未请求资金流的股票仍保留并按形态得分排序。资金请求默认 2 线程、单请求 5 秒超时、最多尝试 2 个主机；连续失败 10 次或阶段运行超过 20 分钟会自动停止。每 10 只打印进度和 ETA，成功数据保存在 `cache/fund_flow/`；当日缓存直接复用，刷新失败时允许使用明确标记为滞后的旧缓存。公开字段和解析口径可参考 [AKShare 的个股资金流实现](https://github.com/akfamily/akshare/blob/main/akshare/stock/stock_fund_em.py)。
+
+形态筛选结束后，程序会先写出 `shape_only_*_all.csv` 并在日志中打印各模式前 10 只预览，再进入资金流排序。因此外部资金接口不可用时，主要筛选结果仍然已经保存在 Drive。
+
+需要立即得到纯形态结果时，可在运行命令末尾加 `--no-fund-flow`。这个开关只跳过可选的资金流排序，不会跳过横盘、筹码峰和启动/反弹模式筛选：
+
+```bash
+python -m ashare_scanner --config config/default.yaml --data-dir "$DATA_DIR" run --no-fund-flow
+```
 
 候选排序优先级固定为：
 

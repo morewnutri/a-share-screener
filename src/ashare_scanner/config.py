@@ -26,9 +26,15 @@ class DataConfig:
     benchmark_name: str = "CSI300"
     force_refresh: bool = False
     fund_flow_enabled: bool = True
-    fund_flow_max_workers: int = 1
+    fund_flow_max_workers: int = 2
+    fund_flow_max_candidates: int = 120
     fund_flow_limit: int = 100
+    fund_flow_request_timeout: float = 5.0
+    fund_flow_max_hosts: int = 2
     fund_flow_request_pause_seconds: float = 0.40
+    fund_flow_progress_every: int = 10
+    fund_flow_failure_streak_limit: int = 10
+    fund_flow_stage_timeout_minutes: float = 20.0
 
 
 @dataclass(frozen=True)
@@ -90,10 +96,24 @@ class AppConfig:
             raise ValueError("incremental_refresh_days must be at least 10.")
         if not 0 < self.data.min_coverage_pct <= 100:
             raise ValueError("min_coverage_pct must be in (0, 100].")
-        if self.data.fund_flow_max_workers < 1 or self.data.fund_flow_limit < 20:
-            raise ValueError("fund-flow workers must be positive and limit must be at least 20.")
+        if (
+            self.data.fund_flow_max_workers < 1
+            or self.data.fund_flow_max_candidates < 1
+            or self.data.fund_flow_limit < 20
+        ):
+            raise ValueError(
+                "fund-flow workers/candidate cap must be positive and history limit at least 20."
+            )
+        if self.data.fund_flow_request_timeout <= 0 or self.data.fund_flow_max_hosts < 1:
+            raise ValueError("fund-flow timeout and host limit must be positive.")
         if self.data.fund_flow_request_pause_seconds < 0:
             raise ValueError("fund_flow_request_pause_seconds must not be negative.")
+        if (
+            self.data.fund_flow_progress_every < 1
+            or self.data.fund_flow_failure_streak_limit < 1
+            or self.data.fund_flow_stage_timeout_minutes <= 0
+        ):
+            raise ValueError("fund-flow progress, failure streak, and stage timeout must be positive.")
         for value, name in (
             (self.strategy.chip_base_ready_score_min, "chip_base_ready_score_min"),
             (self.strategy.chip_base_launch_score_min, "chip_base_launch_score_min"),

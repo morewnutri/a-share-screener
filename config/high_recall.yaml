@@ -18,9 +18,15 @@ data:
   benchmark_name: "CSI300"
   force_refresh: false
   fund_flow_enabled: true
-  fund_flow_max_workers: 1
+  fund_flow_max_workers: 2
+  fund_flow_max_candidates: 120
   fund_flow_limit: 100
+  fund_flow_request_timeout: 5
+  fund_flow_max_hosts: 2
   fund_flow_request_pause_seconds: 0.40
+  fund_flow_progress_every: 10
+  fund_flow_failure_streak_limit: 10
+  fund_flow_stage_timeout_minutes: 20
 
 strategy:
   top_n: 150

@@ -1,5 +1,5 @@
 import json
-from datetime import datetime
+from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -64,6 +64,9 @@ def test_daily_scanner_runs_end_to_end_from_fresh_cache(tmp_path, trending_histo
     assert (run_dir / "chip_base_ready_all.csv").exists()
     assert (run_dir / "chip_base_launch_all.csv").exists()
     assert (run_dir / "chip_base_rebound_all.csv").exists()
+    assert (run_dir / "shape_only_chip_base_ready_all.csv").exists()
+    assert (run_dir / "shape_only_chip_base_launch_all.csv").exists()
+    assert (run_dir / "shape_only_chip_base_rebound_all.csv").exists()
     assert (run_dir / "fund_flow_status.csv").exists()
     assert (run_dir / "screening_funnel.csv").exists()
     assert (run_dir / "near_miss_top100.csv").exists()
@@ -135,3 +138,42 @@ def test_low_coverage_invalidates_published_candidates_and_preserves_state(
     print_run_summary(run_dir, top_n=5)
     output = capsys.readouterr().out
     assert "[本次扫描无效]" in output
+
+
+def test_fund_flow_failures_stop_early_without_dropping_candidates(tmp_path):
+    data_config = DataConfig(
+        fund_flow_max_workers=2,
+        fund_flow_max_candidates=10,
+        fund_flow_request_pause_seconds=0,
+        fund_flow_progress_every=2,
+        fund_flow_failure_streak_limit=2,
+        fund_flow_stage_timeout_minutes=1,
+    )
+    scanner = DailyScanner(AppConfig(data_dir=str(tmp_path), data=data_config))
+
+    class FailedFundFlowSource:
+        def fetch_stock_fund_flow(self, *args, **kwargs):
+            raise TimeoutError("simulated provider timeout")
+
+    scanner.fund_flow_source = FailedFundFlowSource()
+    signal_specs = {
+        "chip_base_ready": ("000001", "chip_base_ready_score"),
+        "chip_base_launch": ("000002", "chip_base_launch_score"),
+        "chip_base_rebound": ("000003", "chip_base_rebound_score"),
+    }
+    signals = {
+        signal: pd.DataFrame([{"code": code, "name": signal, score: 80.0}])
+        for signal, (code, score) in signal_specs.items()
+    }
+    scored = pd.DataFrame([{"code": code} for code, _ in signal_specs.values()])
+
+    _, ranked, status, metadata = scanner._enrich_fund_flow(
+        scored,
+        signals,
+        date(2026, 8, 14),
+    )
+
+    assert metadata["stopped_reason"] == "consecutive_failures"
+    assert metadata["attempted_candidate_count"] == 2
+    assert len(status) == 2
+    assert all(len(ranked[signal]) == 1 for signal in signals)

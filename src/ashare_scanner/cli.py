@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+from dataclasses import replace
 from datetime import date, datetime
 from pathlib import Path
 
@@ -36,6 +37,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=20,
         help="Number of candidates printed for each signal",
     )
+    run_parser.add_argument(
+        "--no-fund-flow",
+        action="store_true",
+        help="Publish morphology results without waiting for optional fund-flow enrichment",
+    )
 
     backtest_parser = subparsers.add_parser("backtest", help="Backtest using cached histories")
     backtest_parser.add_argument("--start", required=True, help="YYYY-MM-DD")
@@ -54,6 +60,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     config = load_config(Path(args.config))
     if args.command == "run":
+        if args.no_fund_flow:
+            config = replace(
+                config,
+                data=replace(config.data, fund_flow_enabled=False),
+            )
         output = DailyScanner(config, args.data_dir).run(_as_datetime(args.as_of))
         print_run_summary(output, args.print_top)
     elif args.command == "backtest":

@@ -417,9 +417,11 @@ class EastmoneyDataSource:
         self,
         code: str,
         limit: int = 100,
+        max_hosts: int | None = None,
     ) -> tuple[pd.DataFrame, str]:
         errors: list[str] = []
-        for host in PUSH2HIS_HOSTS:
+        hosts = PUSH2HIS_HOSTS[:max_hosts] if max_hosts is not None else PUSH2HIS_HOSTS
+        for host in hosts:
             try:
                 params = {
                     "lmt": limit,
@@ -824,5 +826,10 @@ class HybridDataSource:
             errors.append(f"web: {type(exc).__name__}: {exc}")
         raise RuntimeError("all benchmark sources failed: " + " | ".join(errors))
 
-    def fetch_stock_fund_flow(self, code: str, limit: int = 100) -> tuple[pd.DataFrame, str]:
-        return self.web.fetch_stock_fund_flow(code, limit)
+    def fetch_stock_fund_flow(
+        self,
+        code: str,
+        limit: int = 100,
+        max_hosts: int | None = None,
+    ) -> tuple[pd.DataFrame, str]:
+        return self.web.fetch_stock_fund_flow(code, limit, max_hosts)

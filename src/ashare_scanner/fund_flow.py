@@ -19,6 +19,64 @@ FUND_FLOW_FEATURE_COLUMNS = (
 )
 
 
+def select_fund_flow_candidates(
+    signals: dict[str, pd.DataFrame],
+    model_scores: dict[str, str],
+    limit: int,
+) -> tuple[pd.DataFrame, int]:
+    """Select a balanced morphology-first subset for optional fund-flow enrichment."""
+    all_rows = [
+        frame[["code", "name"]]
+        for frame in signals.values()
+        if not frame.empty
+    ]
+    all_candidates = (
+        pd.concat(all_rows, ignore_index=True).drop_duplicates("code")
+        if all_rows
+        else pd.DataFrame(columns=["code", "name"])
+    )
+    total = len(all_candidates)
+    if total == 0:
+        return all_candidates, 0
+
+    prepared: list[pd.DataFrame] = []
+    for signal, frame in signals.items():
+        if frame.empty:
+            continue
+        ranked = frame[["code", "name"]].copy()
+        score_column = model_scores[signal]
+        ranked["_score"] = pd.to_numeric(frame[score_column], errors="coerce").fillna(-np.inf)
+        ranked["code"] = ranked["code"].astype(str).str.zfill(6)
+        prepared.append(
+            ranked.sort_values(["_score", "code"], ascending=[False, True])
+            .drop_duplicates("code")
+            .reset_index(drop=True)
+        )
+
+    selected: list[dict[str, object]] = []
+    seen: set[str] = set()
+    row_index = 0
+    target = min(limit, total)
+    while len(selected) < target:
+        found_row = False
+        for frame in prepared:
+            if row_index >= len(frame):
+                continue
+            found_row = True
+            row = frame.iloc[row_index]
+            code = str(row["code"]).zfill(6)
+            if code in seen:
+                continue
+            seen.add(code)
+            selected.append({"code": code, "name": row["name"]})
+            if len(selected) == target:
+                break
+        if not found_row:
+            break
+        row_index += 1
+    return pd.DataFrame(selected, columns=["code", "name"]), total
+
+
 def summarize_fund_flow(history: pd.DataFrame, expected: date) -> dict:
     frame = history.copy()
     if frame.empty:
