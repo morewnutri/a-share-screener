@@ -13,12 +13,17 @@ data:
   benchmark_secid: "1.000300"
   benchmark_name: "CSI300"
   force_refresh: false
+  fund_flow_enabled: true
+  fund_flow_max_workers: 1
+  fund_flow_limit: 100
+  fund_flow_request_pause_seconds: 0.40
 
 strategy:
   top_n: 100
   min_amount_ma20: 30000000
   chip_base_ready_score_min: 58
   chip_base_launch_score_min: 68
+  chip_base_rebound_score_min: 62
   chip_max_position_250: 0.70
   chip_max_base_width_pct: 30
   chip_max_base_abs_return_pct: 15
@@ -30,6 +35,14 @@ strategy:
   chip_launch_max_peak_distance_pct: 45
   chip_launch_max_return_10d_pct: 45
   chip_max_distribution_days_5: 2
+  chip_rebound_max_position_250: 0.85
+  chip_rebound_max_base_width_pct: 35
+  chip_rebound_max_70_width_pct: 36
+  chip_rebound_max_peak_position: 0.72
+  chip_rebound_min_peak_band_share_pct: 14
+  chip_rebound_min_low_zone_share_pct: 30
+  chip_rebound_max_peak_distance_pct: 65
+  chip_rebound_max_return_20d_pct: 60
   watchlist_ttl_sessions: 12
 
 backtest:

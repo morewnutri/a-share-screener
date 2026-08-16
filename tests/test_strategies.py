@@ -81,6 +81,39 @@ def test_late_extended_launch_is_rejected():
     assert signals["chip_base_launch"].empty
 
 
+def test_recent_platform_rebound_has_its_own_signal():
+    row = _row("000001", True)
+    row.update(
+        {
+            "position_250": 0.80,
+            "base_width_20_pre3_pct": 44.0,
+            "chip_70_width_pct": 32.0,
+            "chip_peak_position": 0.64,
+            "chip_peak_band_share_pct": 18.0,
+            "chip_low_zone_share_pct": 36.0,
+            "chip_peak_distance_pct": 42.0,
+            "rebound_base_high": 15.8,
+            "rebound_base_width_pct": 18.0,
+            "rebound_base_return_pct": 2.0,
+            "rebound_base_turnover_sum_pct": 45.0,
+            "rebound_base_drawdown_120_pct": -25.0,
+            "rebound_base_position_120": 0.42,
+            "rebound_pre_base_decline_60_pct": -16.0,
+            "distance_from_rebound_base_high_pct": 14.0,
+            "rebound_price_action": 1,
+            "return_20d_pct": 24.0,
+            "ma5": 17.8,
+            "ma10": 17.0,
+            "ma20": 16.2,
+            "rs20_percentile": 0.70,
+        }
+    )
+    _, signals = apply_strategies(pd.DataFrame([row]), DataConfig(), StrategyConfig())
+    assert signals["chip_base_ready"].empty
+    assert signals["chip_base_launch"].empty
+    assert signals["chip_base_rebound"]["code"].tolist() == ["000001"]
+
+
 def test_scores_are_capped_and_funnel_matches_outputs():
     frame = pd.DataFrame([_row("000001", False), _row("000002", True)])
     data_config = DataConfig()

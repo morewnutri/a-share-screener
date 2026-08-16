@@ -16,6 +16,12 @@ from .chips import CHIP_MODEL_NAME
 from .config import AppConfig
 from .datasource import EastmoneyDataSource
 from .enrichment import merge_optional_evidence
+from .fund_flow import (
+    FUND_FLOW_FEATURE_COLUMNS,
+    merge_fund_flow_features,
+    rank_signal_by_fund_flow,
+    summarize_fund_flow,
+)
 from .http import HttpClient
 from .indicators import compute_indicators, latest_snapshot
 from .state import update_watchlist
@@ -133,6 +139,12 @@ class DailyScanner:
             self.config.data,
             self.config.strategy,
         )
+        scored, signals, fund_flow_status, fund_flow_metadata = self._enrich_fund_flow(
+            scored,
+            signals,
+            expected,
+        )
+        atomic_write_csv(fund_flow_status, run_dir / "fund_flow_status.csv")
         funnel, near_misses = screening_diagnostics(
             scored,
             self.config.data,
@@ -174,6 +186,7 @@ class DailyScanner:
             active_watchlist,
             funnel,
             external_metadata,
+            fund_flow_metadata,
             time.monotonic() - started,
         )
         atomic_write_json(report, run_dir / "coverage_report.json")
@@ -268,6 +281,143 @@ class DailyScanner:
         status["status"] = "ok"
         return status, snapshot
 
+    def _enrich_fund_flow(
+        self,
+        scored: pd.DataFrame,
+        signals: dict[str, pd.DataFrame],
+        expected: date,
+    ) -> tuple[pd.DataFrame, dict[str, pd.DataFrame], pd.DataFrame, dict[str, Any]]:
+        status_columns = ("code", "name", "status", "rows", "last_date", "source", "error")
+        candidate_rows = [
+            frame[["code", "name"]]
+            for frame in signals.values()
+            if not frame.empty
+        ]
+        candidates = (
+            pd.concat(candidate_rows, ignore_index=True).drop_duplicates("code")
+            if candidate_rows
+            else pd.DataFrame(columns=["code", "name"])
+        )
+        feature_rows: list[dict[str, Any]] = []
+        statuses: list[dict[str, Any]] = []
+
+        if self.config.data.fund_flow_enabled and not candidates.empty:
+            workers = min(self.config.data.fund_flow_max_workers, len(candidates))
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                futures = {
+                    executor.submit(
+                        self._get_stock_fund_flow,
+                        row.code,
+                        expected,
+                    ): (str(row.code).zfill(6), row.name)
+                    for row in candidates.itertuples(index=False)
+                }
+                for future in as_completed(futures):
+                    code, name = futures[future]
+                    try:
+                        history, source = future.result()
+                        summary = summarize_fund_flow(history, expected)
+                        if not summary:
+                            raise RuntimeError("fund-flow history has no usable rows")
+                        feature_rows.append({"code": code, **summary})
+                        statuses.append(
+                            {
+                                "code": code,
+                                "name": name,
+                                "status": "ok"
+                                if summary["fund_flow_is_current"]
+                                else "stale",
+                                "rows": int(len(history)),
+                                "last_date": summary["fund_flow_latest_date"],
+                                "source": source,
+                                "error": "",
+                            }
+                        )
+                    except Exception as exc:
+                        statuses.append(
+                            {
+                                "code": code,
+                                "name": name,
+                                "status": "failed",
+                                "rows": 0,
+                                "last_date": "",
+                                "source": "",
+                                "error": f"{type(exc).__name__}: {exc}",
+                            }
+                        )
+
+        features = pd.DataFrame(feature_rows, columns=("code", *FUND_FLOW_FEATURE_COLUMNS))
+        status_frame = pd.DataFrame(statuses, columns=status_columns)
+        if not status_frame.empty:
+            status_frame = status_frame.sort_values("code").reset_index(drop=True)
+        scored = merge_fund_flow_features(scored, features)
+        model_scores = {
+            "chip_base_ready": "chip_base_ready_score",
+            "chip_base_launch": "chip_base_launch_score",
+            "chip_base_rebound": "chip_base_rebound_score",
+        }
+        ranked: dict[str, pd.DataFrame] = {}
+        for signal, frame in signals.items():
+            enriched = merge_fund_flow_features(frame, features)
+            ranked[signal] = rank_signal_by_fund_flow(enriched, model_scores[signal])
+
+        status_counts = status_frame["status"].value_counts().to_dict() if not status_frame.empty else {}
+        metadata = {
+            "enabled": self.config.data.fund_flow_enabled,
+            "requested_candidate_count": int(len(candidates)),
+            "status_counts": {str(key): int(value) for key, value in status_counts.items()},
+            "current_count": int(
+                pd.to_numeric(features.get("fund_flow_is_current"), errors="coerce").fillna(0).sum()
+            )
+            if not features.empty
+            else 0,
+            "all_windows_positive_count": int(
+                pd.to_numeric(
+                    features.get("fund_flow_all_windows_positive"), errors="coerce"
+                )
+                .fillna(0)
+                .sum()
+            )
+            if not features.empty
+            else 0,
+            "ranking_policy": "current_data,all_3_5_10_20_positive,positive_window_count,3d,5d,10d,20d,model_score",
+            "failure_policy": "keep_candidate_and_fall_back_to_model_score",
+        }
+        return scored, ranked, status_frame, metadata
+
+    def _get_stock_fund_flow(
+        self,
+        code: str,
+        expected: date,
+    ) -> tuple[pd.DataFrame, str]:
+        cache_path = self.cache_dir / "fund_flow" / f"{str(code).zfill(6)}.csv"
+        cached = pd.DataFrame()
+        if cache_path.exists():
+            try:
+                cached = pd.read_csv(cache_path, dtype={"code": str}, parse_dates=["date"])
+            except (OSError, ValueError, pd.errors.EmptyDataError):
+                cached = pd.DataFrame()
+        if (
+            not cached.empty
+            and cached["date"].max().date() == expected
+            and not self.config.data.force_refresh
+        ):
+            return cached, "fund_flow_cache"
+
+        try:
+            history, source = self.source.fetch_stock_fund_flow(
+                code,
+                self.config.data.fund_flow_limit,
+            )
+            atomic_write_csv(history, cache_path)
+            return history, source
+        except Exception:
+            if not cached.empty:
+                return cached, "stale_fund_flow_cache"
+            raise
+        finally:
+            time.sleep(self.config.data.fund_flow_request_pause_seconds)
+
     def _build_report(
         self,
         expected: date,
@@ -280,6 +430,7 @@ class DailyScanner:
         active_watchlist: pd.DataFrame,
         funnel: pd.DataFrame,
         external_metadata: dict[str, Any],
+        fund_flow_metadata: dict[str, Any],
         elapsed_seconds: float,
     ) -> dict[str, Any]:
         status_counts = statuses["status"].value_counts().to_dict()
@@ -296,7 +447,7 @@ class DailyScanner:
         elif candidate_rate < 0.2:
             assessment = "候选率低于0.2%。先看筛选漏斗：主要卡在阶段评分通常表示阈值偏严；大量股票卡在低位、平台或筹码峰结构，才更可能是当日匹配度低。"
         elif candidate_rate < 1.0:
-            assessment = "候选率低于1%，属于选择性较强的结果；结合两个阶段的近似入选股和分项得分判断，不要只看数量。"
+            assessment = "候选率低于1%，属于选择性较强的结果；结合三个阶段的近似入选股和分项得分判断，不要只看数量。"
         else:
             assessment = "候选数量不低，但数量不代表有效性，仍需用滚动回测检查命中率、回撤和不同市场阶段的稳定性。"
         funnel_records = [
@@ -341,6 +492,7 @@ class DailyScanner:
             },
             "signals": {name: int(len(frame)) for name, frame in signals.items()},
             "external_evidence": external_metadata,
+            "fund_flow": fund_flow_metadata,
             "screening": {
                 "unique_candidate_count": int(len(candidate_codes)),
                 "candidate_rate_pct": round(candidate_rate, 3),

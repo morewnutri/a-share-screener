@@ -14,6 +14,7 @@ ACTIVE_STATES = {"SETUP", "TRIGGER", "RETEST"}
 SIGNAL_TO_STATE = {
     "chip_base_ready": "SETUP",
     "chip_base_launch": "TRIGGER",
+    "chip_base_rebound": "RETEST",
 }
 STATE_PRIORITY = {"SETUP": 1, "TRIGGER": 2, "RETEST": 3}
 WATCHLIST_COLUMNS = [
@@ -112,7 +113,10 @@ def update_watchlist(
                     "data_status": "ok",
                     "score_total": row.get("score_total", np.nan),
                     "close": row.get("close", np.nan),
-                    "resistance_price": row.get("base_high_20_pre3", np.nan),
+                    "resistance_price": row.get(
+                        "rebound_base_high",
+                        row.get("base_high_20_pre3", np.nan),
+                    ),
                     "support_price": row.get("chip_peak_price", np.nan),
                     "expires_date": session_offset(expected, ttl_sessions).isoformat(),
                 }

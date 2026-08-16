@@ -38,3 +38,33 @@ def test_sina_quote_parser_extracts_code_and_name():
     assert rows[0]["name"] == "sample"
     assert rows[0]["latest"] == 10.2
     assert "main_net_inflow_ratio_pct" in rows[0]
+
+
+def test_fund_flow_parser_uses_main_inflow_fields():
+    line = "2026-08-14,1000,-10,-20,400,600,5,-1,-2,2,3,12.3,1.2,0,0"
+    frame = EastmoneyDataSource._parse_fund_flow([line], "600001")
+    assert frame.loc[0, "code"] == "600001"
+    assert frame.loc[0, "main_net_inflow_amount"] == 1000
+    assert frame.loc[0, "main_net_inflow_ratio_pct"] == 5
+    assert frame.loc[0, "close"] == 12.3
+
+
+def test_fund_flow_request_uses_history_endpoint_and_limit():
+    class FakeFundHttp:
+        def __init__(self):
+            self.url = ""
+            self.params = {}
+
+        def get_json(self, url, params, referer):
+            self.url = url
+            self.params = params
+            line = "2026-08-14,1000,-10,-20,400,600,5,-1,-2,2,3,12.3,1.2,0,0"
+            return {"data": {"klines": [line]}}
+
+    http = FakeFundHttp()
+    frame, source = EastmoneyDataSource(http).fetch_stock_fund_flow("600001", limit=80)
+    assert len(frame) == 1
+    assert "/api/qt/stock/fflow/daykline/get" in http.url
+    assert http.params["lmt"] == 80
+    assert http.params["secid"] == "1.600001"
+    assert source.endswith(":fund_flow")

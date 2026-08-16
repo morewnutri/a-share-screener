@@ -103,3 +103,28 @@ def test_indicators_can_skip_chip_model_for_benchmark_history():
     indicators = compute_indicators(_decline_base_launch(False), include_chips=False)
     assert "return_20d_pct" in indicators
     assert "chip_peak_price" not in indicators
+
+
+def test_rebound_platform_is_found_before_a_longer_rise():
+    history = _decline_base_launch(False)
+    closes = np.linspace(15.6, 19.0, 10)
+    tail = pd.DataFrame(
+        {
+            "date": pd.bdate_range(history["date"].iloc[-1] + pd.Timedelta(days=1), periods=10),
+            "open": closes * 0.99,
+            "close": closes,
+            "high": closes * 1.02,
+            "low": closes * 0.98,
+            "volume": 3_000_000.0,
+            "amount": 3_000_000.0 * closes,
+            "turnover": 5.0,
+            "pct_chg": pd.Series(closes).pct_change().fillna(2.0),
+            "amplitude": 4.0,
+        }
+    )
+    indicators = compute_indicators(pd.concat([history, tail], ignore_index=True))
+    latest = indicators.iloc[-1]
+    assert 4 <= latest["rebound_base_offset"] <= 20
+    assert latest["rebound_base_width_pct"] <= 15
+    assert latest["distance_from_rebound_base_high_pct"] > 10
+    assert latest["rebound_price_action"] == 1

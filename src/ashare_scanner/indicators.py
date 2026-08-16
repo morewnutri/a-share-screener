@@ -77,6 +77,88 @@ def _cost_concentration_proxy(frame: pd.DataFrame, window: int = 60) -> None:
     frame["distance_to_cost_center_pct"] = (frame["close"] / center - 1) * 100
 
 
+def _best_recent_platform(
+    frame: pd.DataFrame,
+    min_offset: int = 4,
+    max_offset: int = 20,
+    window: int = 20,
+) -> None:
+    """Find the tightest recent platform that ended before an ongoing rebound."""
+    offsets = list(range(min_offset, max_offset + 1))
+    candidates: dict[str, list[pd.Series]] = {
+        "high": [],
+        "low": [],
+        "return": [],
+        "turnover": [],
+        "drawdown": [],
+        "position": [],
+        "pre_decline": [],
+        "quality": [],
+    }
+    for offset in offsets:
+        end_close = frame["close"].shift(offset)
+        high = frame["high"].shift(offset).rolling(window, min_periods=window).max()
+        low = frame["low"].shift(offset).rolling(window, min_periods=window).min()
+        width = (high / low.replace(0, np.nan) - 1) * 100
+        base_return = (end_close / frame["close"].shift(offset + window - 1) - 1) * 100
+        turnover = frame["turnover"].shift(offset).rolling(window, min_periods=15).sum()
+        prior_high = frame["high"].shift(offset).rolling(120, min_periods=80).max()
+        prior_low = frame["low"].shift(offset).rolling(120, min_periods=80).min()
+        midpoint = (high + low) / 2
+        drawdown = (end_close / prior_high - 1) * 100
+        position = (midpoint - prior_low) / (prior_high - prior_low).replace(0, np.nan)
+        pre_decline = (
+            frame["close"].shift(offset + window - 1)
+            / frame["close"].shift(offset + window + 59)
+            - 1
+        ) * 100
+        quality = width + base_return.abs() * 0.60 + offset * 0.15
+        candidates["high"].append(high)
+        candidates["low"].append(low)
+        candidates["return"].append(base_return)
+        candidates["turnover"].append(turnover)
+        candidates["drawdown"].append(drawdown)
+        candidates["position"].append(position)
+        candidates["pre_decline"].append(pre_decline)
+        candidates["quality"].append(quality)
+
+    quality_values = np.column_stack(
+        [series.to_numpy(dtype=float) for series in candidates["quality"]]
+    )
+    valid = np.isfinite(quality_values).any(axis=1)
+    best = np.argmin(np.where(np.isfinite(quality_values), quality_values, np.inf), axis=1)
+    rows = np.arange(len(frame))
+
+    def selected(name: str) -> np.ndarray:
+        values = np.column_stack(
+            [series.to_numpy(dtype=float) for series in candidates[name]]
+        )
+        result = values[rows, best]
+        result[~valid] = np.nan
+        return result
+
+    best_offset = np.asarray(offsets, dtype=float)[best]
+    best_offset[~valid] = np.nan
+    frame["rebound_base_offset"] = best_offset
+    frame["rebound_base_high"] = selected("high")
+    frame["rebound_base_low"] = selected("low")
+    frame["rebound_base_mid"] = (
+        frame["rebound_base_high"] + frame["rebound_base_low"]
+    ) / 2
+    frame["rebound_base_width_pct"] = (
+        frame["rebound_base_high"] / frame["rebound_base_low"].replace(0, np.nan) - 1
+    ) * 100
+    frame["rebound_base_return_pct"] = selected("return")
+    frame["rebound_base_turnover_sum_pct"] = selected("turnover")
+    frame["rebound_base_drawdown_120_pct"] = selected("drawdown")
+    frame["rebound_base_position_120"] = selected("position")
+    frame["rebound_pre_base_decline_60_pct"] = selected("pre_decline")
+    frame["rebound_base_quality"] = selected("quality")
+    frame["distance_from_rebound_base_high_pct"] = (
+        frame["close"] / frame["rebound_base_high"] - 1
+    ) * 100
+
+
 def compute_indicators(
     history: pd.DataFrame,
     *,
@@ -223,6 +305,7 @@ def compute_indicators(
     frame["distance_from_base_mid_pct"] = (
         frame["close"] / frame["base_mid_20_pre3"] - 1
     ) * 100
+    _best_recent_platform(frame)
     frame["early_launch_price_action"] = (
         (frame["return_5d_pct"].between(3, 35, inclusive="both"))
         & (frame["close"] > frame["ma5"])
@@ -230,6 +313,12 @@ def compute_indicators(
         & (frame["distance_from_base_mid_pct"] >= 4)
         & (frame["distance_from_base_high_pct"].between(-4, 35, inclusive="both"))
     ).astype(int)
+    frame["rebound_price_action"] = (
+        frame["distance_from_rebound_base_high_pct"].between(-2, 55, inclusive="both")
+        & frame["return_20d_pct"].between(3, 60, inclusive="both")
+        & (frame["close"] >= frame["ma20"] * 0.95)
+    ).astype(int)
+    frame = frame.copy()
 
     rolling_ranges: dict[int, pd.Series] = {}
     for window in (10, 20, 60, 120):

@@ -21,6 +21,8 @@ PUSH2HIS_HOSTS = (
     "https://push2his.eastmoney.com",
     "https://7.push2his.eastmoney.com",
     "https://19.push2his.eastmoney.com",
+    "https://63.push2his.eastmoney.com",
+    "https://80.push2his.eastmoney.com",
 )
 EASTMONEY_FS = "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23,m:0+t:81+s:2048"
 MAINBOARD_PREFIXES = ("600", "601", "603", "605", "000", "001", "002", "003")
@@ -239,6 +241,38 @@ class EastmoneyDataSource:
     def fetch_stock_history(self, code: str, start: str, end: date) -> tuple[pd.DataFrame, str]:
         return self._fetch_history(code_to_secid(code), code, start, end, self.fqt)
 
+    def fetch_stock_fund_flow(
+        self,
+        code: str,
+        limit: int = 100,
+    ) -> tuple[pd.DataFrame, str]:
+        errors: list[str] = []
+        for host in PUSH2HIS_HOSTS:
+            try:
+                params = {
+                    "lmt": limit,
+                    "klt": 101,
+                    "secid": code_to_secid(code),
+                    "fields1": "f1,f2,f3,f7",
+                    "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63,f64,f65",
+                    "ut": "b2884a393a59ad64002292a3e90d46a5",
+                    "_": str(int(time.time() * 1000)),
+                }
+                data = self.http.get_json(
+                    f"{host}/api/qt/stock/fflow/daykline/get",
+                    params,
+                    "https://data.eastmoney.com/zjlx/detail.html",
+                ).get("data")
+                if not data:
+                    raise RuntimeError("empty fund-flow payload")
+                frame = self._parse_fund_flow(data.get("klines") or [], code)
+                if frame.empty:
+                    raise RuntimeError("empty fund-flow history")
+                return frame, f"eastmoney:{host}:fund_flow"
+            except Exception as exc:
+                errors.append(f"{host}: {type(exc).__name__}: {exc}")
+        raise RuntimeError(f"fund flow failed for {code}: " + " | ".join(errors))
+
     def fetch_benchmark_history(
         self,
         secid: str,
@@ -313,3 +347,36 @@ class EastmoneyDataSource:
         frame = frame.dropna(subset=["date", "open", "high", "low", "close", "volume"])
         frame = frame.drop_duplicates("date", keep="last").sort_values("date").reset_index(drop=True)
         return frame
+
+    @staticmethod
+    def _parse_fund_flow(klines: list[str], code: str) -> pd.DataFrame:
+        columns = (
+            "date",
+            "main_net_inflow_amount",
+            "small_net_inflow_amount",
+            "medium_net_inflow_amount",
+            "large_net_inflow_amount",
+            "super_large_net_inflow_amount",
+            "main_net_inflow_ratio_pct",
+            "small_net_inflow_ratio_pct",
+            "medium_net_inflow_ratio_pct",
+            "large_net_inflow_ratio_pct",
+            "super_large_net_inflow_ratio_pct",
+            "close",
+            "pct_chg",
+            "unused_1",
+            "unused_2",
+        )
+        rows = []
+        for line in klines:
+            parts = str(line).split(",")
+            if len(parts) >= len(columns):
+                rows.append(parts[: len(columns)])
+        if not rows:
+            return pd.DataFrame(columns=(*columns, "code"))
+        frame = pd.DataFrame(rows, columns=columns)
+        frame["date"] = pd.to_datetime(frame["date"], errors="coerce")
+        for column in columns[1:]:
+            frame[column] = pd.to_numeric(frame[column], errors="coerce")
+        frame["code"] = str(code).zfill(6)
+        return frame.dropna(subset=["date", "main_net_inflow_amount"]).sort_values("date").reset_index(drop=True)

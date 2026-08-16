@@ -63,6 +63,8 @@ def test_daily_scanner_runs_end_to_end_from_fresh_cache(tmp_path, trending_histo
     assert (run_dir / "indicators_scored.csv").exists()
     assert (run_dir / "chip_base_ready_all.csv").exists()
     assert (run_dir / "chip_base_launch_all.csv").exists()
+    assert (run_dir / "chip_base_rebound_all.csv").exists()
+    assert (run_dir / "fund_flow_status.csv").exists()
     assert (run_dir / "screening_funnel.csv").exists()
     assert (run_dir / "near_miss_top100.csv").exists()
     print_run_summary(run_dir, top_n=5)

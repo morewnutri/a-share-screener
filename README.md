@@ -6,7 +6,7 @@
 
 ## 筛选目标
 
-模型针对的是同一类结构的两个阶段，不再用“均线已经完全多头排列”作为前提：
+模型针对的是同一类结构的三个阶段，不再用“均线已经完全多头排列”作为前提：
 
 ### 1. 低位横盘 + 筹码峰（待启动）
 
@@ -23,7 +23,14 @@
 - 量能、MACD 改善用于加分，不要求 MA20、MA30、MA60 已经全部转为多头。
 - 排除 10 日涨幅过大、快速假突破以及高换手大振幅但价格停滞的情况，避免追到加速末段。
 
-这两个输出是同一生命周期的两个观察阶段，不是互相无关的两套策略。
+### 3. 横盘后反弹（启动确认）
+
+- 用最近 4 至 20 日内结束的最佳 20 日平台识别已经离开平台一段时间的股票。
+- 允许平台和筹码位置比“待启动”阶段略高、略宽，但仍要求此前有回撤、筹码峰可见且 70% 成本区不过分分散。
+- 当前价格需要保持在历史平台上沿附近或上方，20 日涨幅必须为正但不能已经严重过热。
+- 该阶段用于覆盖新洁能、赛腾股份以及横盘后反弹的京泉华、翔鹭钨业一类结构，不会放宽前两个阶段的条件。
+
+三个输出是同一生命周期的不同观察阶段，不是互相无关的策略。
 
 ## 筹码分布口径
 
@@ -62,7 +69,7 @@
 - 评分：平台深度和紧凑度、筹码峰质量、低位筹码比例、启动量价和风险情况。
 - 默认配置是中等召回；`config/high_recall.yaml` 只用于对照，不建议直接把所有阈值同时放宽。
 
-用户提供的中天科技、远东股份、兴发集团等 16 只股票只放在 Colab 的样本审计列表中，不会被硬编码为候选，也不会改变评分。每次运行后 notebook 会显示这些股票当前是否命中，以及最先卡在哪个筛选步骤。样本形态会随时间变化，所以校准必须指定观察日期，不能把股票名称永久当成正样本标签。
+用户提供的股票只放在 Colab 的样本审计列表中，不会被硬编码为候选，也不会改变评分。每次运行后 notebook 会显示这些股票当前是否命中，以及最先卡在哪个筛选步骤。样本形态会随时间变化，所以校准必须指定观察日期，不能把股票名称永久当成正样本标签。
 
 ## 为什么有时只有 0 至 2 只
 
@@ -120,14 +127,16 @@ python -m ashare_scanner --config config/default.yaml --data-dir data backtest \
 
 - `chip_base_ready_all.csv`：低位横盘且筹码峰形成、仍在峰值附近的候选。
 - `chip_base_launch_all.csv`：同样结构中最近刚开始向上的候选。
+- `chip_base_rebound_all.csv`：平台已经结束 4 至 20 日、目前仍处于反弹确认阶段的候选。
 - 对应的 `_top100.csv`：便于查看的排名文件；`top_n` 不会截断 `_all.csv`。
 - `indicators_scored.csv`：所有有效股票的原始指标、筹码特征和分项得分。
 - `screening_funnel.csv`：每个硬门槛后的剩余数量。
 - `near_miss_top100.csv`：最接近入选的股票及首个未通过步骤。
 - `fetch_status.csv`：每只股票的抓取、历史长度和最新日期状态。
+- `fund_flow_status.csv`：最终候选的资金流抓取日期、来源和失败原因。
 - `coverage_report.json`：数据覆盖率、真实候选数、数据口径和自动诊断。
 - `watchlist_active.csv`、`state_transitions.csv`：跨日观察状态。
-- `reference_examples_audit.csv`：Colab 根据 16 只参考样本生成的诊断文件，不参与选股。
+- `reference_examples_audit.csv`：Colab 根据参考样本生成的诊断文件，不参与选股。
 
 ## 主要配置
 
@@ -135,6 +144,7 @@ python -m ashare_scanner --config config/default.yaml --data-dir data backtest \
 | --- | --- |
 | `chip_base_ready_score_min` | 待启动阶段最低评分 |
 | `chip_base_launch_score_min` | 刚启动阶段最低评分 |
+| `chip_base_rebound_score_min` | 横盘后反弹阶段最低评分 |
 | `chip_max_base_width_pct` | 启动前 20 日平台最大宽度 |
 | `chip_max_base_abs_return_pct` | 平台期允许的最大绝对涨跌幅 |
 | `chip_max_70_width_pct` | 70% 筹码成本区最大宽度 |
@@ -143,9 +153,25 @@ python -m ashare_scanner --config config/default.yaml --data-dir data backtest \
 | `chip_min_low_zone_share_pct` | 低位区域最低筹码占比 |
 | `chip_ready_max_peak_distance_pct` | 待启动股票允许偏离主峰的最大幅度 |
 | `chip_launch_max_return_10d_pct` | 刚启动阶段的 10 日最大涨幅，防止追高 |
+| `chip_rebound_max_base_width_pct` | 历史反弹平台允许的最大宽度 |
+| `chip_rebound_max_return_20d_pct` | 反弹确认阶段允许的 20 日最大涨幅 |
 | `min_amount_ma20` | 20 日平均成交额门槛 |
 
-## 外部资金数据
+## 主力资金排序
+
+程序使用东方财富个股资金流历史接口，只对最终候选请求近 100 个交易日数据，因此不会给全市场额外增加数千次请求。资金请求默认单线程并间隔 0.4 秒，成功数据保存在 `cache/fund_flow/`；当日缓存直接复用，刷新失败时允许使用明确标记为滞后的旧缓存。公开字段和解析口径可参考 [AKShare 的个股资金流实现](https://github.com/akfamily/akshare/blob/main/akshare/stock/stock_fund_em.py)。
+
+候选排序优先级固定为：
+
+1. 资金数据更新到本次筛选交易日。
+2. 3 日、5 日、10 日、20 日累计主力净流入全部大于 0。
+3. 四个周期中为正的周期数量。
+4. 依次比较 3 日、5 日、10 日、20 日净流入金额。
+5. 资金条件相同时再比较形态评分。
+
+资金流接口失败、数据滞后或历史不足 20 日时，股票不会被删除，只退回形态评分排序。输出会保留 `fund_flow_rank_reason`、各周期净流入金额以及 `fund_flow_status.csv`，避免把缺失数据误判为净流出。
+
+## 其他外部数据
 
 龙虎榜、融资余额、股东户数、减持和行业利润等数据不能从 OHLCV 推导。项目仍可读取 `DATA_DIR/external/funding_signals.csv` 并写入全量结果供人工核对，但这些不完整、低频的数据目前不参与筹码峰策略的硬筛选或评分。程序不会用缺失值伪造资金结论。
 

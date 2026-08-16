@@ -21,6 +21,10 @@ class DataConfig:
     benchmark_secid: str = "1.000300"
     benchmark_name: str = "CSI300"
     force_refresh: bool = False
+    fund_flow_enabled: bool = True
+    fund_flow_max_workers: int = 1
+    fund_flow_limit: int = 100
+    fund_flow_request_pause_seconds: float = 0.40
 
 
 @dataclass(frozen=True)
@@ -29,6 +33,7 @@ class StrategyConfig:
     min_amount_ma20: float = 30_000_000
     chip_base_ready_score_min: float = 58.0
     chip_base_launch_score_min: float = 68.0
+    chip_base_rebound_score_min: float = 62.0
     chip_max_position_250: float = 0.70
     chip_max_base_width_pct: float = 30.0
     chip_max_base_abs_return_pct: float = 15.0
@@ -40,6 +45,14 @@ class StrategyConfig:
     chip_launch_max_peak_distance_pct: float = 45.0
     chip_launch_max_return_10d_pct: float = 45.0
     chip_max_distribution_days_5: int = 2
+    chip_rebound_max_position_250: float = 0.85
+    chip_rebound_max_base_width_pct: float = 35.0
+    chip_rebound_max_70_width_pct: float = 36.0
+    chip_rebound_max_peak_position: float = 0.72
+    chip_rebound_min_peak_band_share_pct: float = 14.0
+    chip_rebound_min_low_zone_share_pct: float = 30.0
+    chip_rebound_max_peak_distance_pct: float = 65.0
+    chip_rebound_max_return_20d_pct: float = 60.0
     watchlist_ttl_sessions: int = 12
 
 
@@ -65,15 +78,22 @@ class AppConfig:
             raise ValueError("min_history_bars must be at least 120 for the configured indicators.")
         if self.data.max_workers < 1:
             raise ValueError("max_workers must be positive.")
+        if self.data.fund_flow_max_workers < 1 or self.data.fund_flow_limit < 20:
+            raise ValueError("fund-flow workers must be positive and limit must be at least 20.")
+        if self.data.fund_flow_request_pause_seconds < 0:
+            raise ValueError("fund_flow_request_pause_seconds must not be negative.")
         for value, name in (
             (self.strategy.chip_base_ready_score_min, "chip_base_ready_score_min"),
             (self.strategy.chip_base_launch_score_min, "chip_base_launch_score_min"),
+            (self.strategy.chip_base_rebound_score_min, "chip_base_rebound_score_min"),
         ):
             if not 0 <= value <= 100:
                 raise ValueError(f"{name} must be between 0 and 100.")
         for value, name in (
             (self.strategy.chip_max_position_250, "chip_max_position_250"),
             (self.strategy.chip_max_peak_position, "chip_max_peak_position"),
+            (self.strategy.chip_rebound_max_position_250, "chip_rebound_max_position_250"),
+            (self.strategy.chip_rebound_max_peak_position, "chip_rebound_max_peak_position"),
         ):
             if not 0 < value <= 1:
                 raise ValueError(f"{name} must be in (0, 1].")

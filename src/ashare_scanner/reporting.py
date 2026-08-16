@@ -9,6 +9,7 @@ import pandas as pd
 SIGNAL_LABELS = {
     "chip_base_ready": "低位横盘+筹码峰（待启动）",
     "chip_base_launch": "低位横盘+筹码峰（刚启动）",
+    "chip_base_rebound": "横盘后反弹（启动确认）",
 }
 
 STEP_LABELS = {
@@ -23,6 +24,12 @@ STEP_LABELS = {
     "early_launch": "刚启动价格行为",
     "chip_base_ready_score": "待启动评分",
     "chip_base_launch_score": "刚启动评分",
+    "rebound_location": "反弹平台位置",
+    "recent_historical_platform": "近期历史平台",
+    "rebound_chip_peak": "反弹型筹码峰",
+    "rebound_risk_control": "反弹风险控制",
+    "post_platform_rebound": "平台后反弹",
+    "chip_base_rebound_score": "反弹确认评分",
 }
 
 RESULT_COLUMNS = [
@@ -33,6 +40,12 @@ RESULT_COLUMNS = [
     "pct_chg",
     "chip_base_ready_score",
     "chip_base_launch_score",
+    "chip_base_rebound_score",
+    "fund_flow_rank_reason",
+    "main_net_inflow_3d_yi",
+    "main_net_inflow_5d_yi",
+    "main_net_inflow_10d_yi",
+    "main_net_inflow_20d_yi",
     "base_drawdown_from_120_high_pct",
     "base_width_20_pre3_pct",
     "base_return_20_pre3_pct",
@@ -54,6 +67,12 @@ RESULT_RENAMES = {
     "pct_chg": "涨跌%",
     "chip_base_ready_score": "待启动分",
     "chip_base_launch_score": "刚启动分",
+    "chip_base_rebound_score": "反弹确认分",
+    "fund_flow_rank_reason": "资金排序依据",
+    "main_net_inflow_3d_yi": "3日主力净流入(亿)",
+    "main_net_inflow_5d_yi": "5日主力净流入(亿)",
+    "main_net_inflow_10d_yi": "10日主力净流入(亿)",
+    "main_net_inflow_20d_yi": "20日主力净流入(亿)",
     "base_drawdown_from_120_high_pct": "平台前高回撤%",
     "base_width_20_pre3_pct": "平台宽度%",
     "base_return_20_pre3_pct": "平台涨跌%",
@@ -113,6 +132,12 @@ def print_run_summary(run_dir: str | Path, top_n: int = 20) -> None:
     )
     print(f"诊断: {screening.get('assessment', '')}")
     print("筹码口径: modeled_cyq（换手衰减+日内三角分布估算，不是真实账户持仓）")
+    fund_flow = report.get("fund_flow", {})
+    print(
+        f"资金排序: 请求{fund_flow.get('requested_candidate_count', 0)}只 | "
+        f"当日有效{fund_flow.get('current_count', 0)}只 | "
+        f"3/5/10/20日均净流入{fund_flow.get('all_windows_positive_count', 0)}只"
+    )
     print("=" * 112)
 
     counts = report.get("signals", {})
