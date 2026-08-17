@@ -41,15 +41,17 @@ class DataConfig:
 class StrategyConfig:
     top_n: int = 100
     min_amount_ma20: float = 30_000_000
-    chip_base_ready_score_min: float = 48.0
-    chip_base_launch_score_min: float = 55.0
-    chip_base_rebound_score_min: float = 52.0
+    chip_base_ready_score_min: float = 60.0
+    chip_base_launch_score_min: float = 65.0
+    chip_base_rebound_score_min: float = 62.0
     chip_max_position_250: float = 0.92
     chip_max_base_width_pct: float = 42.0
     chip_max_base_abs_return_pct: float = 22.0
     chip_max_70_width_pct: float = 45.0
     chip_max_peak_position: float = 0.92
     chip_min_peak_band_share_pct: float = 10.0
+    chip_strong_peak_band_share_pct: float = 25.0
+    chip_strong_peak_max_70_width_pct: float = 60.0
     chip_min_low_zone_share_pct: float = 42.0
     chip_ready_max_peak_distance_pct: float = 30.0
     chip_launch_max_peak_distance_pct: float = 60.0
@@ -63,6 +65,7 @@ class StrategyConfig:
     chip_rebound_min_low_zone_share_pct: float = 30.0
     chip_rebound_max_peak_distance_pct: float = 90.0
     chip_rebound_max_return_20d_pct: float = 75.0
+    chip_rebound_min_return_5d_pct: float = 3.0
     watchlist_ttl_sessions: int = 12
 
 
@@ -121,6 +124,15 @@ class AppConfig:
         ):
             if not 0 <= value <= 100:
                 raise ValueError(f"{name} must be between 0 and 100.")
+        if (
+            self.strategy.chip_strong_peak_band_share_pct
+            < self.strategy.chip_min_peak_band_share_pct
+            or self.strategy.chip_strong_peak_max_70_width_pct
+            < self.strategy.chip_max_70_width_pct
+        ):
+            raise ValueError(
+                "strong-peak thresholds must be no stricter than the standard chip thresholds."
+            )
         for value, name in (
             (self.strategy.chip_max_position_250, "chip_max_position_250"),
             (self.strategy.chip_max_peak_position, "chip_max_peak_position"),

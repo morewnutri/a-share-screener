@@ -31,15 +31,17 @@ data:
 strategy:
   top_n: 150
   min_amount_ma20: 20000000
-  chip_base_ready_score_min: 42
-  chip_base_launch_score_min: 48
-  chip_base_rebound_score_min: 46
+  chip_base_ready_score_min: 55
+  chip_base_launch_score_min: 60
+  chip_base_rebound_score_min: 58
   chip_max_position_250: 0.95
   chip_max_base_width_pct: 50
   chip_max_base_abs_return_pct: 28
   chip_max_70_width_pct: 55
   chip_max_peak_position: 0.95
   chip_min_peak_band_share_pct: 8
+  chip_strong_peak_band_share_pct: 22
+  chip_strong_peak_max_70_width_pct: 68
   chip_min_low_zone_share_pct: 34
   chip_ready_max_peak_distance_pct: 40
   chip_launch_max_peak_distance_pct: 75
@@ -53,6 +55,7 @@ strategy:
   chip_rebound_min_low_zone_share_pct: 22
   chip_rebound_max_peak_distance_pct: 120
   chip_rebound_max_return_20d_pct: 90
+  chip_rebound_min_return_5d_pct: 2
   watchlist_ttl_sessions: 15
 
 backtest:

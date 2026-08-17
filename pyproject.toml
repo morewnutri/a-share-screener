@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ashare-daily-scanner"
-version = "0.3.1"
+version = "0.3.2"
 description = "End-of-day A-share main-board low-base and modeled-chip-peak scanner"
 readme = "README.md"
 requires-python = ">=3.10"

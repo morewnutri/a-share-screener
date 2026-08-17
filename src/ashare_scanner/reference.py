@@ -31,3 +31,7 @@ REFERENCE_STOCKS = (
 )
 
 REFERENCE_CODES = frozenset(code for code, _ in REFERENCE_STOCKS)
+
+# The first group is the user's current positive-label benchmark. It is used
+# only for recall reporting; strategy masks never import or inspect this set.
+PRIMARY_ACCEPTANCE_CODES = frozenset(code for code, _ in REFERENCE_STOCKS[:13])

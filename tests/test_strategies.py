@@ -141,6 +141,55 @@ def test_visible_peak_with_moderate_width_is_not_overfiltered():
     assert signals["chip_base_launch"]["code"].tolist() == ["000001"]
 
 
+def test_twenty_day_moderate_width_platform_is_accepted():
+    row = _row("000001", True)
+    row.update(
+        {
+            "adaptive_base_window": 20,
+            "adaptive_base_offset": 3,
+            "adaptive_base_width_pct": 24.0,
+            "adaptive_base_return_pct": 4.0,
+        }
+    )
+    _, signals = apply_strategies(pd.DataFrame([row]), DataConfig(), StrategyConfig())
+    assert signals["chip_base_launch"]["code"].tolist() == ["000001"]
+
+
+def test_strong_visible_peak_can_offset_moderately_wide_cost_band():
+    row = _row("000001", True)
+    row["chip_70_width_pct"] = 55.0
+    row["chip_peak_band_share_pct"] = 32.0
+    row["chip_peak_position"] = 0.40
+    _, signals = apply_strategies(pd.DataFrame([row]), DataConfig(), StrategyConfig())
+    assert signals["chip_base_launch"]["code"].tolist() == ["000001"]
+
+
+def test_five_day_turn_up_confirms_old_platform_rebound():
+    row = _row("000001", True)
+    row.update(
+        {
+            "position_250": 0.80,
+            "adaptive_base_high": 16.0,
+            "adaptive_base_window": 20,
+            "adaptive_base_offset": 20,
+            "adaptive_base_width_pct": 24.0,
+            "adaptive_base_return_pct": -4.0,
+            "adaptive_base_drawdown_120_pct": -20.0,
+            "adaptive_base_position_120": 0.50,
+            "adaptive_pre_base_decline_60_pct": -12.0,
+            "adaptive_launch_price_action": 0,
+            "adaptive_rebound_price_action": 0,
+            "adaptive_trend_votes": 3,
+            "return_5d_pct": 6.0,
+            "return_20d_pct": -8.0,
+            "chip_peak_distance_pct": 20.0,
+        }
+    )
+    _, signals = apply_strategies(pd.DataFrame([row]), DataConfig(), StrategyConfig())
+    assert signals["chip_base_ready"].empty
+    assert signals["chip_base_rebound"]["code"].tolist() == ["000001"]
+
+
 def test_scores_are_capped_and_funnel_matches_outputs():
     frame = pd.DataFrame([_row("000001", False), _row("000002", True)])
     data_config = DataConfig()

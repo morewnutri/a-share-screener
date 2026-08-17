@@ -101,7 +101,7 @@ CLI 和 notebook 都会直接打印筛选结果。空 CSV 只有表头表示当�
 2. 打开 `notebooks/colab_daily_scan.ipynb`。
 3. 修改 `REPO_URL`，挂载 Google Drive，运行全部单元格。
 4. 默认使用 `config/default.yaml`；需要判断是否过严时改为 `config/high_recall.yaml` 再跑一次。
-5. 安装后先运行 `python -m ashare_scanner --version`，确认打印版本至少为 `0.3.1`，避免 GitHub `main` 仍是旧代码。
+5. 安装后先运行 `python -m ashare_scanner --version`，确认打印版本至少为 `0.3.2`，避免 GitHub `main` 仍是旧代码。
 
 首次运行会下载主板股票历史，后续优先复用 Drive 缓存。建议将以下数据目录保存在 Drive：
 
@@ -165,11 +165,14 @@ python -m ashare_scanner --config config/default.yaml --data-dir data backtest \
 | `chip_max_70_width_pct` | 70% 筹码成本区最大宽度 |
 | `chip_max_peak_position` | 主峰在长期价格区间中的最高位置 |
 | `chip_min_peak_band_share_pct` | 主峰附近最低筹码占比 |
+| `chip_strong_peak_band_share_pct` | 允许较宽成本区时要求的强主峰占比 |
+| `chip_strong_peak_max_70_width_pct` | 强主峰例外允许的最大 70% 成本宽度 |
 | `chip_min_low_zone_share_pct` | 低位区域最低筹码占比 |
 | `chip_ready_max_peak_distance_pct` | 待启动股票允许偏离主峰的最大幅度 |
 | `chip_launch_max_return_10d_pct` | 刚启动阶段的 10 日最大涨幅，防止追高 |
 | `chip_rebound_max_base_width_pct` | 历史反弹平台允许的最大宽度 |
 | `chip_rebound_max_return_20d_pct` | 反弹确认阶段允许的 20 日最大涨幅 |
+| `chip_rebound_min_return_5d_pct` | 旧平台反弹的短期转强确认阈值 |
 | `min_amount_ma20` | 20 日平均成交额门槛 |
 | `min_coverage_pct` | 发布正式候选和更新观察池所需的最低日线覆盖率 |
 | `request_min_interval_seconds` | 所有日线请求共享的最小时间间隔 |
@@ -195,6 +198,8 @@ python -m ashare_scanner --config config/default.yaml --data-dir "$DATA_DIR" run
 5. 资金条件相同时再比较形态评分。
 
 资金流接口失败、数据滞后或历史不足 20 日时，股票不会被删除，只退回形态评分排序。输出会保留 `fund_flow_rank_reason`、各周期净流入金额以及 `fund_flow_status.csv`，避免把缺失数据误判为净流出。
+
+`reference.py` 中的股票名单仅用于回归审计、优先抓取和失败定位，`strategies.py` 不读取该名单。程序会打印“标准答案命中 x/13”，但不会因为代码出现在名单中就强制入选。标准答案应同时记录观察日期；股票进入加速或派发阶段后，不应永久保持正样本身份。
 
 ## 其他外部数据
 

@@ -94,6 +94,8 @@ RESULT_RENAMES = {
 REFERENCE_COLUMNS = [
     "code",
     "name",
+    "acceptance_example",
+    "selected_any",
     "fetch_status",
     "last_date",
     "chip_base_ready",
@@ -119,6 +121,8 @@ REFERENCE_COLUMNS = [
 REFERENCE_RENAMES = {
     "code": "代码",
     "name": "名称",
+    "acceptance_example": "标准答案",
+    "selected_any": "是否命中",
     "fetch_status": "日线状态",
     "last_date": "最新日线",
     "chip_base_ready": "待启动",
@@ -162,6 +166,17 @@ def _print_reference_audit(run_dir: Path) -> None:
     indicator_status = audit.get("indicators_ready", pd.Series(0, index=audit.index))
     ready_count = int(pd.to_numeric(indicator_status, errors="coerce").fillna(0).sum())
     print(f"\n[参考样本逐股审计] 指标可用 {ready_count}/{len(audit)} 只")
+    if "acceptance_example" in audit and "selected_any" in audit:
+        acceptance = audit[
+            pd.to_numeric(audit["acceptance_example"], errors="coerce").fillna(0) == 1
+        ]
+        hit_count = int(
+            pd.to_numeric(acceptance["selected_any"], errors="coerce").fillna(0).sum()
+        )
+        print(
+            f"[标准答案回归检查] 命中 {hit_count}/{len(acceptance)} 只；"
+            "名单只用于审计，不会绕过策略条件。"
+        )
     view = audit.copy()
     if "closest_signal" in view:
         view["closest_signal"] = view["closest_signal"].map(SIGNAL_LABELS).fillna(

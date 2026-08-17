@@ -27,7 +27,7 @@ from .fund_flow import (
 )
 from .http import HttpClient
 from .indicators import compute_indicators, latest_snapshot
-from .reference import REFERENCE_CODES, REFERENCE_STOCKS
+from .reference import PRIMARY_ACCEPTANCE_CODES, REFERENCE_CODES, REFERENCE_STOCKS
 from .state import TRANSITION_COLUMNS, read_active_watchlist, update_watchlist
 from .strategies import (
     SIGNAL_ORDER,
@@ -483,6 +483,7 @@ class DailyScanner:
         coverage_valid: bool,
     ) -> pd.DataFrame:
         audit = pd.DataFrame(REFERENCE_STOCKS, columns=("code", "reference_name"))
+        audit["acceptance_example"] = audit["code"].isin(PRIMARY_ACCEPTANCE_CODES).astype(int)
         market_names = universe[["code", "name"]].copy()
         market_names["code"] = market_names["code"].astype(str).str.zfill(6)
         market_names = market_names.rename(columns={"name": "market_name"})
@@ -513,6 +514,7 @@ class DailyScanner:
                 .str.zfill(6)
             )
             audit[signal_name] = audit["code"].isin(selected_codes).astype(int)
+        audit["selected_any"] = audit[list(SIGNAL_ORDER)].max(axis=1)
         if not near_misses.empty:
             diagnostic_columns = [
                 column for column in ("code", "closest_signal", "failed_at") if column in near_misses
@@ -525,6 +527,8 @@ class DailyScanner:
         leading = [
             "code",
             "name",
+            "acceptance_example",
+            "selected_any",
             "fetch_status",
             "history_source",
             "last_date",
@@ -833,6 +837,13 @@ class DailyScanner:
             "reference_audit": {
                 "count": int(len(reference_audit)),
                 "indicators_ready": int(reference_audit["indicators_ready"].sum()),
+                "acceptance_count": int(reference_audit["acceptance_example"].sum()),
+                "acceptance_hit_count": int(
+                    reference_audit.loc[
+                        reference_audit["acceptance_example"] == 1,
+                        "selected_any",
+                    ].sum()
+                ),
                 "fetch_status_counts": {
                     str(key): int(value)
                     for key, value in reference_audit["fetch_status"].fillna("not_in_universe").value_counts().items()

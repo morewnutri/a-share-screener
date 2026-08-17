@@ -117,6 +117,7 @@ def add_factor_scores(frame: pd.DataFrame) -> pd.DataFrame:
         "distribution_day_count_5",
         "breakout_failed_fast",
         "breakout_stall_distribution",
+        "return_5d_pct",
         "return_10d_pct",
         "return_20d_pct",
         "vol_ratio_20",
@@ -241,13 +242,22 @@ def signal_funnels(
             frame["adaptive_base_return_pct"].abs()
             <= strategy_config.chip_max_base_abs_return_pct
         )
+    )
+    strong_visible_peak = (
+        (
+            frame["chip_peak_band_share_pct"]
+            >= strategy_config.chip_strong_peak_band_share_pct
+        )
         & (
-            (frame["adaptive_base_window"] >= 30)
-            | (frame["adaptive_base_width_pct"] <= 18)
+            frame["chip_70_width_pct"]
+            <= strategy_config.chip_strong_peak_max_70_width_pct
         )
     )
     concentrated_low_peak = (
-        (frame["chip_70_width_pct"] <= strategy_config.chip_max_70_width_pct)
+        (
+            (frame["chip_70_width_pct"] <= strategy_config.chip_max_70_width_pct)
+            | strong_visible_peak
+        )
         & (frame["chip_peak_position"] <= strategy_config.chip_max_peak_position)
         & (
             frame["chip_peak_band_share_pct"]
@@ -261,9 +271,15 @@ def signal_funnels(
             & (frame["distance_from_adaptive_base_high_pct"] < -8)
         )
     )
+    recent_base = frame["adaptive_base_offset"] <= 8
+    early_launch_evidence = (frame["adaptive_launch_price_action"] == 1) | (
+        recent_base
+        & (frame["return_5d_pct"] >= 3)
+        & (frame["adaptive_trend_votes"] >= 2)
+    )
     ready_position = (
-        (frame["adaptive_ready_price_action"] == 1)
-        & (frame["adaptive_launch_price_action"] == 0)
+        recent_base
+        & ~early_launch_evidence
         & frame["chip_peak_distance_pct"].between(
             -12,
             strategy_config.chip_ready_max_peak_distance_pct,
@@ -271,7 +287,7 @@ def signal_funnels(
         )
     )
     launch = (
-        (frame["adaptive_launch_price_action"] == 1)
+        early_launch_evidence
         & frame["chip_peak_distance_pct"].between(
             -8,
             strategy_config.chip_launch_max_peak_distance_pct,
@@ -302,7 +318,17 @@ def signal_funnels(
         )
     )
     rebound_move = (
-        (frame["adaptive_rebound_price_action"] == 1)
+        (
+            (frame["adaptive_rebound_price_action"] == 1)
+            | (
+                (frame["adaptive_base_offset"] >= 8)
+                & (
+                    frame["return_5d_pct"]
+                    >= strategy_config.chip_rebound_min_return_5d_pct
+                )
+                & (frame["adaptive_trend_votes"] >= 2)
+            )
+        )
         & frame["chip_peak_distance_pct"].between(
             -10,
             strategy_config.chip_rebound_max_peak_distance_pct,
