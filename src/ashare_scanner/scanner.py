@@ -157,6 +157,18 @@ class DailyScanner:
                 "status_counts": {},
                 "current_count": 0,
                 "all_windows_positive_count": 0,
+                "participant_structure_count": 0,
+                "institutional_preferred_count": 0,
+                "selection_weights": {
+                    "morphology": self.config.strategy.selection_morphology_weight,
+                    "fund_flow": self.config.strategy.selection_fund_flow_weight,
+                    "institutional_dominance": (
+                        self.config.strategy.selection_institutional_weight
+                    ),
+                },
+                "institutional_preferred_min": (
+                    self.config.strategy.institutional_dominance_preferred_min
+                ),
                 "skipped_reason": "invalid_data_coverage",
             }
         atomic_write_csv(fund_flow_status, run_dir / "fund_flow_status.csv")
@@ -664,9 +676,37 @@ class DailyScanner:
         ranked: dict[str, pd.DataFrame] = {}
         for signal, frame in signals.items():
             enriched = merge_fund_flow_features(frame, features)
-            ranked[signal] = rank_signal_by_fund_flow(enriched, model_scores[signal])
+            ranked[signal] = rank_signal_by_fund_flow(
+                enriched,
+                model_scores[signal],
+                self.config.strategy.selection_morphology_weight,
+                self.config.strategy.selection_fund_flow_weight,
+                self.config.strategy.selection_institutional_weight,
+            )
 
-        status_counts = status_frame["status"].value_counts().to_dict() if not status_frame.empty else {}
+        status_counts = (
+            status_frame["status"].value_counts().to_dict()
+            if not status_frame.empty
+            else {}
+        )
+        if features.empty:
+            current_mask = pd.Series(dtype=bool)
+            participant_mask = pd.Series(dtype=bool)
+            institutional_scores = pd.Series(dtype=float)
+        else:
+            current_mask = (
+                pd.to_numeric(features["fund_flow_is_current"], errors="coerce").fillna(0)
+                >= 1
+            )
+            participant_mask = current_mask & (
+                pd.to_numeric(
+                    features["participant_structure_available"], errors="coerce"
+                ).fillna(0)
+                >= 1
+            )
+            institutional_scores = pd.to_numeric(
+                features["institutional_dominance_score"], errors="coerce"
+            )
         metadata = {
             "enabled": self.config.data.fund_flow_enabled,
             "total_candidate_count": int(total_candidates),
@@ -678,22 +718,44 @@ class DailyScanner:
             "unattempted_selected_count": int(max(0, len(candidates) - attempted)),
             "stopped_reason": stopped_reason,
             "status_counts": {str(key): int(value) for key, value in status_counts.items()},
-            "current_count": int(
-                pd.to_numeric(features.get("fund_flow_is_current"), errors="coerce").fillna(0).sum()
-            )
-            if not features.empty
-            else 0,
+            "current_count": int(current_mask.sum()),
             "all_windows_positive_count": int(
-                pd.to_numeric(
-                    features.get("fund_flow_all_windows_positive"), errors="coerce"
+                (
+                    current_mask
+                    & (
+                        pd.to_numeric(
+                            features["fund_flow_all_windows_positive"],
+                            errors="coerce",
+                        ).fillna(0)
+                        >= 1
+                    )
                 )
-                .fillna(0)
                 .sum()
             )
             if not features.empty
             else 0,
-            "ranking_policy": "current_data,all_3_5_10_20_positive,positive_window_count,3d,5d,10d,20d,model_score",
-            "failure_policy": "keep_candidate_and_fall_back_to_model_score",
+            "participant_structure_count": int(participant_mask.sum()),
+            "institutional_preferred_count": int(
+                (
+                    participant_mask
+                    & (
+                        institutional_scores
+                        >= self.config.strategy.institutional_dominance_preferred_min
+                    )
+                ).sum()
+            )
+            if not features.empty
+            else 0,
+            "selection_weights": {
+                "morphology": self.config.strategy.selection_morphology_weight,
+                "fund_flow": self.config.strategy.selection_fund_flow_weight,
+                "institutional_dominance": self.config.strategy.selection_institutional_weight,
+            },
+            "institutional_preferred_min": (
+                self.config.strategy.institutional_dominance_preferred_min
+            ),
+            "ranking_policy": "weighted_morphology_fund_flow_institutional_dominance",
+            "failure_policy": "keep_candidate_and_use_neutral_50_for_missing_flow_evidence",
         }
         return scored, ranked, status_frame, metadata
 
@@ -802,6 +864,9 @@ class DailyScanner:
                 "tencent_amount": "estimated_from_ohlc_typical_price_and_volume",
                 "chip_distribution": CHIP_MODEL_NAME,
                 "chip_distribution_is_account_level_data": False,
+                "participant_structure": "eastmoney_order_size_net_flow_proxy",
+                "participant_structure_is_account_identity_data": False,
+                "retail_pressure_index": "100_minus_institutional_dominance_score",
                 "incomplete_daily_bars": "discarded",
                 "stale_stock_history": "excluded_from_signals",
             },

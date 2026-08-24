@@ -50,6 +50,10 @@ def test_fund_flow_parser_uses_main_inflow_fields():
     assert frame.loc[0, "code"] == "600001"
     assert frame.loc[0, "main_net_inflow_amount"] == 1000
     assert frame.loc[0, "main_net_inflow_ratio_pct"] == 5
+    assert frame.loc[0, "small_net_inflow_amount"] == -10
+    assert frame.loc[0, "medium_net_inflow_amount"] == -20
+    assert frame.loc[0, "large_net_inflow_amount"] == 400
+    assert frame.loc[0, "super_large_net_inflow_amount"] == 600
     assert frame.loc[0, "close"] == 12.3
 
 

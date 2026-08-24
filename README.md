@@ -101,7 +101,7 @@ CLI 和 notebook 都会直接打印筛选结果。空 CSV 只有表头表示当�
 2. 打开 `notebooks/colab_daily_scan.ipynb`。
 3. 修改 `REPO_URL`，挂载 Google Drive，运行全部单元格。
 4. 默认使用 `config/default.yaml`；需要判断是否过严时改为 `config/high_recall.yaml` 再跑一次。
-5. 安装后先运行 `python -m ashare_scanner --version`，确认打印版本至少为 `0.3.2`，避免 GitHub `main` 仍是旧代码。
+5. 安装后先运行 `python -m ashare_scanner --version`，确认打印版本至少为 `0.4.0`，避免 GitHub `main` 仍是旧代码。
 
 首次运行会下载主板股票历史，后续优先复用 Drive 缓存。建议将以下数据目录保存在 Drive：
 
@@ -176,6 +176,10 @@ python -m ashare_scanner --config config/default.yaml --data-dir data backtest \
 | `min_amount_ma20` | 20 日平均成交额门槛 |
 | `min_coverage_pct` | 发布正式候选和更新观察池所需的最低日线覆盖率 |
 | `request_min_interval_seconds` | 所有日线请求共享的最小时间间隔 |
+| `selection_morphology_weight` | 横盘与筹码形态在最终排序中的权重，默认 50% |
+| `selection_fund_flow_weight` | 主力净流入强度在最终排序中的权重，默认 35% |
+| `selection_institutional_weight` | 机构主导代理指标在最终排序中的权重，默认 15% |
+| `institutional_dominance_preferred_min` | 报告中统计“机构偏强”的参考分界，不是硬筛选门槛 |
 
 ## 主力资金排序
 
@@ -189,15 +193,26 @@ python -m ashare_scanner --config config/default.yaml --data-dir data backtest \
 python -m ashare_scanner --config config/default.yaml --data-dir "$DATA_DIR" run --no-fund-flow
 ```
 
-候选排序优先级固定为：
+最终排序采用软评分，不额外增加会显著减少候选的硬门槛：`综合分 = 形态分 × 50% + 主力资金分 × 35% + 机构主导指数 × 15%`。形态分仍由横盘、低位筹码峰和启动/反弹结构决定，因此筹码与形态的影响最大；资金流只对已经通过形态筛选的候选重排。
 
-1. 资金数据更新到本次筛选交易日。
-2. 3 日、5 日、10 日、20 日累计主力净流入全部大于 0。
-3. 四个周期中为正的周期数量。
-4. 依次比较 3 日、5 日、10 日、20 日净流入金额。
-5. 资金条件相同时再比较形态评分。
+主力资金分综合 3、5、10、20 日累计主力净流入方向和主力净流入占比。四个周期均为正仍会得到高分，但不再用单一布尔条件压过明显更好的筹码形态。
 
-资金流接口失败、数据滞后或历史不足 20 日时，股票不会被删除，只退回形态评分排序。输出会保留 `fund_flow_rank_reason`、各周期净流入金额以及 `fund_flow_status.csv`，避免把缺失数据误判为净流出。
+## 机构主导与散户压力代理指标
+
+东方财富资金流历史同时提供超大单、大单、中单和小单净额。程序把“超大单 + 大单”作为机构/大户资金代理，把“小单”作为散户资金代理，并按 3、5、10、20 日分别计算：
+
+```text
+方向差 = (机构净额 - 小单净额) / 四类单净额绝对值之和
+窗口机构分 = 50 + 50 × clip(方向差, -1, 1)
+机构主导指数 = 窗口机构分加权值 × 80% + 20日方向连续性分 × 20%
+散户压力指数 = 100 - 机构主导指数
+```
+
+窗口权重为 3 日 35%、5 日 30%、10 日 20%、20 日 15%，近期行为更重要。连续性分奖励“机构净流入且小单净流出”的交易日，惩罚相反方向，中性日按中性处理。指数 70 以上标记为“机构主导明显”，58 至 70 为“机构偏强”，42 至 58 为“机构散户均衡”。
+
+这是**交易单大小结构代理**，不是账户身份、真实股东人数或持仓集中度。大单不一定来自机构，小单也不一定来自散户，因此该指标只占 15% 且不作为硬筛选门槛。资金流接口失败、数据滞后、历史不足 20 日或缺少分单字段时，对应资金证据按中性 50 分处理，股票不会被删除；`selection_evidence_coverage_pct` 会显示实际证据覆盖率，避免把缺失数据误判为净流出或散户主导。
+
+输出会保留 `final_selection_score`、`fund_flow_strength_score`、`institutional_dominance_score`、`retail_pressure_index`、`participant_structure_label`、`institutional_favorable_day_ratio_20_pct`、`fund_flow_rank_reason` 和各周期净流入金额，并通过 `fund_flow_status.csv` 记录抓取状态。
 
 `reference.py` 中的股票名单仅用于回归审计、优先抓取和失败定位，`strategies.py` 不读取该名单。程序会打印“标准答案命中 x/13”，但不会因为代码出现在名单中就强制入选。标准答案应同时记录观察日期；股票进入加速或派发阶段后，不应永久保持正样本身份。
 

@@ -56,6 +56,10 @@ strategy:
   chip_rebound_max_peak_distance_pct: 120
   chip_rebound_max_return_20d_pct: 90
   chip_rebound_min_return_5d_pct: 2
+  selection_morphology_weight: 0.50
+  selection_fund_flow_weight: 0.35
+  selection_institutional_weight: 0.15
+  institutional_dominance_preferred_min: 55
   watchlist_ttl_sessions: 15
 
 backtest:

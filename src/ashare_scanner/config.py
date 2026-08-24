@@ -66,6 +66,10 @@ class StrategyConfig:
     chip_rebound_max_peak_distance_pct: float = 90.0
     chip_rebound_max_return_20d_pct: float = 75.0
     chip_rebound_min_return_5d_pct: float = 3.0
+    selection_morphology_weight: float = 0.50
+    selection_fund_flow_weight: float = 0.35
+    selection_institutional_weight: float = 0.15
+    institutional_dominance_preferred_min: float = 58.0
     watchlist_ttl_sessions: int = 12
 
 
@@ -132,6 +136,19 @@ class AppConfig:
         ):
             raise ValueError(
                 "strong-peak thresholds must be no stricter than the standard chip thresholds."
+            )
+        selection_weights = (
+            self.strategy.selection_morphology_weight,
+            self.strategy.selection_fund_flow_weight,
+            self.strategy.selection_institutional_weight,
+        )
+        if any(value < 0 for value in selection_weights) or not abs(
+            sum(selection_weights) - 1
+        ) < 1e-9:
+            raise ValueError("selection weights must be non-negative and sum to 1.")
+        if not 0 <= self.strategy.institutional_dominance_preferred_min <= 100:
+            raise ValueError(
+                "institutional_dominance_preferred_min must be between 0 and 100."
             )
         for value, name in (
             (self.strategy.chip_max_position_250, "chip_max_position_250"),

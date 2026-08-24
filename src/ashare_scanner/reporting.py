@@ -39,9 +39,16 @@ RESULT_COLUMNS = [
     "name",
     "close",
     "pct_chg",
+    "final_selection_score",
     "chip_base_ready_score",
     "chip_base_launch_score",
     "chip_base_rebound_score",
+    "fund_flow_strength_score",
+    "institutional_dominance_score",
+    "retail_pressure_index",
+    "participant_structure_label",
+    "institutional_favorable_day_ratio_20_pct",
+    "selection_evidence_coverage_pct",
     "fund_flow_rank_reason",
     "main_net_inflow_3d_yi",
     "main_net_inflow_5d_yi",
@@ -68,9 +75,16 @@ RESULT_RENAMES = {
     "name": "名称",
     "close": "收盘",
     "pct_chg": "涨跌%",
+    "final_selection_score": "综合分",
     "chip_base_ready_score": "待启动分",
     "chip_base_launch_score": "刚启动分",
     "chip_base_rebound_score": "反弹确认分",
+    "fund_flow_strength_score": "主力资金分",
+    "institutional_dominance_score": "机构主导指数",
+    "retail_pressure_index": "散户压力指数",
+    "participant_structure_label": "参与者结构",
+    "institutional_favorable_day_ratio_20_pct": "20日机构占优天数%",
+    "selection_evidence_coverage_pct": "排序证据覆盖%",
     "fund_flow_rank_reason": "资金排序依据",
     "main_net_inflow_3d_yi": "3日主力净流入(亿)",
     "main_net_inflow_5d_yi": "5日主力净流入(亿)",
@@ -103,9 +117,14 @@ REFERENCE_COLUMNS = [
     "chip_base_rebound",
     "closest_signal",
     "failed_at",
+    "final_selection_score",
     "chip_base_ready_score",
     "chip_base_launch_score",
     "chip_base_rebound_score",
+    "fund_flow_strength_score",
+    "institutional_dominance_score",
+    "retail_pressure_index",
+    "participant_structure_label",
     "adaptive_base_window",
     "adaptive_base_offset",
     "adaptive_base_width_pct",
@@ -243,12 +262,23 @@ def print_run_summary(run_dir: str | Path, top_n: int = 20) -> None:
     )
     print(f"诊断: {screening.get('assessment', '')}")
     print("筹码口径: modeled_cyq（换手衰减+日内三角分布估算，不是真实账户持仓）")
+    print("散户口径: 超大/大/中/小单净额构造的交易行为代理（不是账户或股东身份）")
     fund_flow = report.get("fund_flow", {})
+    weights = fund_flow.get("selection_weights", {})
     print(
         f"资金排序: 请求{fund_flow.get('requested_candidate_count', 0)}只 | "
         f"当日有效{fund_flow.get('current_count', 0)}只 | "
-        f"3/5/10/20日均净流入{fund_flow.get('all_windows_positive_count', 0)}只"
+        f"3/5/10/20日均净流入{fund_flow.get('all_windows_positive_count', 0)}只 | "
+        f"机构结构有效{fund_flow.get('participant_structure_count', 0)}只 | "
+        f"机构偏强{fund_flow.get('institutional_preferred_count', 0)}只"
     )
+    if weights:
+        print(
+            "综合排序权重: "
+            f"形态{float(weights.get('morphology', 0)):.0%} | "
+            f"主力资金{float(weights.get('fund_flow', 0)):.0%} | "
+            f"机构主导{float(weights.get('institutional_dominance', 0)):.0%}"
+        )
     print("=" * 112)
 
     if not screening.get("valid", True):
