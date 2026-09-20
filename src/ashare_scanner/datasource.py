@@ -67,7 +67,7 @@ def is_mainboard_code(code: str) -> bool:
 
 
 class EastmoneyDataSource:
-    """Public market data with Tencent history and Eastmoney fallbacks."""
+    """Public web market data with Eastmoney history and Tencent fallback."""
 
     def __init__(self, http: HttpClient, fqt: int = 1) -> None:
         if fqt != 1:
@@ -288,6 +288,19 @@ class EastmoneyDataSource:
         turnover_hint: float = np.nan,
     ) -> tuple[pd.DataFrame, str]:
         errors: list[str] = []
+        # Eastmoney returns forward-adjusted OHLCV, amount, and reported daily
+        # turnover in one request.  It is safe to call concurrently and avoids
+        # serializing the whole market through BaoStock's process-global client.
+        if self._history_provider_available("eastmoney"):
+            try:
+                result = self._fetch_history(code_to_secid(code), code, start, end, self.fqt)
+                self._record_history_result("eastmoney", True)
+                return result
+            except Exception as exc:
+                self._record_history_result("eastmoney", False)
+                errors.append(f"eastmoney: {type(exc).__name__}: {exc}")
+        else:
+            errors.append("eastmoney: cooling down after consecutive failures")
         if self._history_provider_available("tencent"):
             try:
                 result = self._fetch_tencent_history(
@@ -305,16 +318,6 @@ class EastmoneyDataSource:
                 errors.append(f"tencent: {type(exc).__name__}: {exc}")
         else:
             errors.append("tencent: cooling down after consecutive failures")
-        if self._history_provider_available("eastmoney"):
-            try:
-                result = self._fetch_history(code_to_secid(code), code, start, end, self.fqt)
-                self._record_history_result("eastmoney", True)
-                return result
-            except Exception as exc:
-                self._record_history_result("eastmoney", False)
-                errors.append(f"eastmoney: {type(exc).__name__}: {exc}")
-        else:
-            errors.append("eastmoney: cooling down after consecutive failures")
         raise RuntimeError(f"all history sources failed for {code}: " + " | ".join(errors))
 
     def _fetch_tencent_history(
@@ -778,7 +781,7 @@ class BaoStockDataSource:
 
 
 class HybridDataSource:
-    """BaoStock-first daily bars with public-web fallbacks and fund flow."""
+    """Concurrent public-web daily bars with BaoStock as a serialized fallback."""
 
     def __init__(
         self,
@@ -802,15 +805,15 @@ class HybridDataSource:
 
     def fetch_stock_history(self, code: str, start: str, end: date, **kwargs: Any) -> tuple[pd.DataFrame, str]:
         errors: list[str] = []
+        try:
+            return self.web.fetch_stock_history(code, start, end, **kwargs)
+        except Exception as exc:
+            errors.append(f"web: {type(exc).__name__}: {exc}")
         if self.baostock.available:
             try:
                 return self.baostock.fetch_stock_history(code, start, end, **kwargs)
             except Exception as exc:
                 errors.append(f"baostock: {type(exc).__name__}: {exc}")
-        try:
-            return self.web.fetch_stock_history(code, start, end, **kwargs)
-        except Exception as exc:
-            errors.append(f"web: {type(exc).__name__}: {exc}")
         raise RuntimeError("all stock-history sources failed: " + " | ".join(errors))
 
     def fetch_benchmark_history(self, secid: str, start: str, end: date) -> tuple[pd.DataFrame, str]:

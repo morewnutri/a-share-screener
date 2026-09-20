@@ -262,47 +262,47 @@ class DailyScanner:
         snapshots: list[dict[str, Any]] = []
         completed_total = 0
 
-        for label, rows, worker_limit in (
-            ("reference", priority, min(2, self.config.data.max_workers)),
-            ("market", regular, self.config.data.max_workers),
-        ):
-            if not rows:
-                continue
-            LOGGER.info("Fetching %s group: %d stocks, workers=%d", label, len(rows), worker_limit)
-            with ThreadPoolExecutor(max_workers=worker_limit) as executor:
-                futures = {
-                    executor.submit(
-                        self._process_stock,
-                        str(row.get("code", "")).zfill(6),
-                        str(row.get("name", "")),
-                        expected,
-                        row,
-                    ): (str(row.get("code", "")).zfill(6), str(row.get("name", "")))
-                    for row in rows
-                }
-                for future in as_completed(futures):
-                    code, name = futures[future]
-                    try:
-                        status, snapshot = future.result()
-                    except Exception as exc:
-                        status = {
-                            "code": code,
-                            "name": name,
-                            "status": "failed",
-                            "source": "",
-                            "from_cache": 0,
-                            "bars": 0,
-                            "last_date": "",
-                            "error": f"{type(exc).__name__}: {exc}",
-                        }
-                        snapshot = None
-                    statuses.append(status)
-                    if snapshot is not None:
-                        snapshots.append(snapshot)
-                    completed_total += 1
-                    if completed_total % 50 == 0 or completed_total == len(records):
-                        ok_count = sum(row["status"] == "ok" for row in statuses)
-                        LOGGER.info("Progress %d/%d, ok=%d", completed_total, len(records), ok_count)
+        # Keep reference stocks at the front of the queue for early diagnostics,
+        # but do not force the first group through a separate two-worker pool.
+        # A single pool lets the web data source use the configured concurrency
+        # from the start of the scan.
+        ordered_rows = priority + regular
+        worker_limit = self.config.data.max_workers
+        LOGGER.info("Fetching %d stocks, workers=%d", len(ordered_rows), worker_limit)
+        with ThreadPoolExecutor(max_workers=worker_limit) as executor:
+            futures = {
+                executor.submit(
+                    self._process_stock,
+                    str(row.get("code", "")).zfill(6),
+                    str(row.get("name", "")),
+                    expected,
+                    row,
+                ): (str(row.get("code", "")).zfill(6), str(row.get("name", "")))
+                for row in ordered_rows
+            }
+            for future in as_completed(futures):
+                code, name = futures[future]
+                try:
+                    status, snapshot = future.result()
+                except Exception as exc:
+                    status = {
+                        "code": code,
+                        "name": name,
+                        "status": "failed",
+                        "source": "",
+                        "from_cache": 0,
+                        "bars": 0,
+                        "last_date": "",
+                        "error": f"{type(exc).__name__}: {exc}",
+                    }
+                    snapshot = None
+                statuses.append(status)
+                if snapshot is not None:
+                    snapshots.append(snapshot)
+                completed_total += 1
+                if completed_total % 50 == 0 or completed_total == len(records):
+                    ok_count = sum(row["status"] == "ok" for row in statuses)
+                    LOGGER.info("Progress %d/%d, ok=%d", completed_total, len(records), ok_count)
         return statuses, snapshots
 
     @staticmethod
@@ -388,11 +388,7 @@ class DailyScanner:
             try:
                 context = market_context or {}
                 cached_source = str(cached.metadata.get("source", ""))
-                incremental = (
-                    not cached.frame.empty
-                    and cached_source.startswith("baostock:")
-                    and not self.config.data.force_refresh
-                )
+                incremental = not cached.frame.empty and not self.config.data.force_refresh
                 fetch_start = self.config.data.start_date
                 if incremental:
                     fetch_start = (
@@ -409,7 +405,7 @@ class DailyScanner:
                     ),
                     turnover_hint=pd.to_numeric(context.get("turnover"), errors="coerce"),
                 )
-                if incremental and source.startswith("baostock:"):
+                if incremental:
                     merged = self._merge_incremental_history(cached.frame, history)
                     if merged is None:
                         history, source = self.source.fetch_stock_history(

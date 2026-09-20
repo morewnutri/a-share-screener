@@ -12,10 +12,10 @@ class DataConfig:
     start_date: str = "2022-01-01"
     fqt: int = 1
     min_history_bars: int = 150
-    max_workers: int = 4
+    max_workers: int = 12
     request_timeout: float = 12.0
     max_retries: int = 2
-    request_min_interval_seconds: float = 0.12
+    request_min_interval_seconds: float = 0.02
     baostock_max_retries: int = 2
     incremental_refresh_days: int = 30
     min_coverage_pct: float = 90.0
